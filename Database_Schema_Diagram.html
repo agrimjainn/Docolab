@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collaborative Documentation Platform — Database Schema</title>
+<style>
+  :root{
+    --bg:#0f1620; --panel:#16202c; --panel-2:#1b2734; --ink:#e6edf3; --muted:#8aa0b4;
+    --line:#2b3a4a; --wire:#4a6076; --wire-hot:#6fd3c6;
+    --A:#7aa2f7; --B:#9ece6a; --C:#e0af68; --D:#bb9af7; --E:#f7768e; --APPROVAL:#7ee0d3;
+    --chip:#22303f;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+  body{padding:0 0 80px}
+  a{color:inherit}
+
+  header{
+    padding:34px 40px 22px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#13202c, #0f1620);
+    position:sticky;top:0;z-index:50;backdrop-filter:blur(6px);
+  }
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--APPROVAL)}
+  h1{margin:8px 0 4px;font-size:25px;font-weight:650;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:13.5px;max-width:760px;line-height:1.5}
+  .meta{display:flex;gap:22px;margin-top:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .meta b{color:var(--ink);font-weight:600}
+
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .lg{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--line);
+      border-radius:20px;font-size:12px;background:var(--panel);cursor:pointer;user-select:none;transition:.15s}
+  .lg:hover{border-color:var(--wire)}
+  .lg .dot{width:9px;height:9px;border-radius:50%}
+  .lg.off{opacity:.32}
+  .hint{margin-left:auto;font-size:11.5px;color:var(--muted);align-self:center;font-family:var(--mono)}
+
+  .stage{position:relative;padding:30px 40px}
+  svg.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible}
+  path.wire{fill:none;stroke:var(--wire);stroke-width:1.4;opacity:.32;transition:.18s}
+  path.wire.self{stroke-dasharray:4 3}
+  path.wire.hot{stroke:var(--wire-hot);opacity:1;stroke-width:2.2}
+  path.wire.dim{opacity:.06}
+
+  .grid{position:relative;z-index:2;display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+
+  .group-label{grid-column:1/-1;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);margin:14px 0 -4px;display:flex;align-items:center;gap:10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .group-label .pill{padding:2px 8px;border-radius:6px;background:var(--chip);color:var(--ink);font-size:10px;letter-spacing:.05em}
+
+  .table{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    transition:.18s;position:relative;align-self:start;
+  }
+  .table.dim{opacity:.28;filter:grayscale(.4)}
+  .table.hot{border-color:var(--wire-hot);box-shadow:0 0 0 1px var(--wire-hot),0 10px 30px -12px #000}
+  .table .head{
+    display:flex;align-items:center;gap:9px;padding:11px 13px;cursor:pointer;
+    border-left:4px solid var(--accent);background:var(--panel-2);
+  }
+  .table .head .name{font-family:var(--mono);font-size:14px;font-weight:600}
+  .table .head .tag{margin-left:auto;font-size:9.5px;font-family:var(--mono);letter-spacing:.08em;
+    padding:2px 6px;border-radius:5px;text-transform:uppercase}
+  .tag.new{background:rgba(126,224,211,.16);color:var(--APPROVAL)}
+  .tag.hub{background:rgba(122,162,247,.16);color:var(--A)}
+  .tag.plate{background:rgba(224,175,104,.14);color:var(--C)}
+
+  .cols{list-style:none;margin:0;padding:5px 0;display:none}
+  .table.open .cols{display:block}
+  .cols li{display:flex;gap:8px;align-items:baseline;padding:3px 13px;font-size:12px}
+  .cols li .col{font-family:var(--mono);color:var(--ink)}
+  .cols li .ty{font-family:var(--mono);color:var(--muted);font-size:11px;margin-left:auto;white-space:nowrap}
+  .cols li.pk .col{color:var(--C)}
+  .cols li.fk .col{color:var(--A)}
+  .cols li.pk .col::after{content:" PK";color:var(--C);font-size:9px}
+  .cols li.fk .col::after{content:" FK";color:var(--A);font-size:9px}
+  .cols li.uq{color:var(--muted);font-style:italic}
+  .table .relrow{padding:8px 13px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);
+    display:none;font-family:var(--mono);line-height:1.7}
+  .table.open .relrow{display:block}
+  .table .relrow b{color:var(--wire-hot);font-weight:500}
+
+  footer{padding:24px 40px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);line-height:1.6}
+  footer code{font-family:var(--mono);color:var(--ink);background:var(--chip);padding:1px 5px;border-radius:4px}
+
+  @media (max-width:1100px){ .grid{grid-template-columns:repeat(6,1fr)} }
+  @media (max-width:680px){ .stage{padding:20px} header{padding:24px 20px} .grid{grid-template-columns:repeat(2,1fr);gap:12px} .hint{display:none} }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important} }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Collaborative Documentation Platform · Plate UI Edition</div>
+  <h1>Database Schema &amp; Relations</h1>
+  <div class="sub">18 tables across five concerns. Postgres stores metadata, state, and pointers — never document content (that lives in Yjs/S3). Tap a table to expand its columns; hover to trace its foreign keys.</div>
+  <div class="meta">
+    <span><b>18</b> tables</span>
+    <span><b>2</b> hubs · users, documents</span>
+    <span><b>3</b> new for dynamic approval</span>
+    <span><b>org_id</b> on every table</span>
+    <span><b>UUID</b> primary keys</span>
+  </div>
+  <div class="legend" id="legend">
+    <span class="lg" data-group="A"><span class="dot" style="background:var(--A)"></span>Identity &amp; access</span>
+    <span class="lg" data-group="B"><span class="dot" style="background:var(--B)"></span>Content org</span>
+    <span class="lg" data-group="C"><span class="dot" style="background:var(--C)"></span>Collaboration &amp; review</span>
+    <span class="lg" data-group="D"><span class="dot" style="background:var(--D)"></span>Versioning &amp; approval</span>
+    <span class="lg" data-group="E"><span class="dot" style="background:var(--E)"></span>Audit</span>
+    <span class="hint">hover a table → trace relations · click → expand</span>
+  </div>
+</header>
+
+<div class="stage">
+  <svg class="wires" id="wires"></svg>
+  <div class="grid" id="grid"></div>
+</div>
+
+<footer>
+  <strong style="color:var(--ink)">Reading the relations.</strong>
+  Lines are foreign keys: a solid line runs from the table holding the FK to the table it references. Dashed lines are
+  <em>self-references</em> (<code>folders.parent_folder_id</code>, <code>comments.parent_comment_id</code>). The two hubs —
+  <code>users</code> and <code>documents</code> — collect the most lines because almost every governance row records "who did it" and "to which doc."
+  The dynamic-approval chain is its own cluster: <code>approval_policies → approval_policy_steps</code> defines a chain, and
+  <code>versions → approval_step_events</code> records walking it. None of the pre-existing tables gain an outgoing reference to the new ones —
+  only <code>documents.approval_policy_id</code> (nullable) points in — which is why approval layering touches nothing else.
+</footer>
+
+<script>
+// ---- schema model: id, group, label tag, columns [{c,t,k}], fks [target] ----
+const TABLES = [
+  // Group A — identity & access
+  {id:'users',g:'A',tag:'hub',cols:[['id','uuid','pk'],['org_id','uuid'],['email','citext UNIQUE'],['password_hash','text'],['display_name','text'],['avatar_color','text'],['status','text']],fk:[]},
+  {id:'roles',g:'A',cols:[['id','uuid','pk'],['org_id','uuid'],['name','text'],['description','text']],fk:[]},
+  {id:'role_permissions',g:'A',cols:[['role_id','uuid','fk'],['permission','text'],['(role_id,permission)','PK','uq']],fk:['roles']},
+  {id:'assignments',g:'A',cols:[['id','uuid','pk'],['org_id','uuid'],['user_id','uuid','fk'],['role_id','uuid','fk'],['scope_type','text'],['scope_id','uuid'],['(user,scope_type,scope_id)','UNIQUE','uq']],fk:['users','roles']},
+  // Group B — content org
+  {id:'folders',g:'B',cols:[['id','uuid','pk'],['org_id','uuid'],['parent_folder_id','uuid FK NULL','fk'],['name','text'],['created_by','uuid','fk']],fk:['folders','users']},
+  {id:'documents',g:'B',tag:'hub',cols:[['id','uuid','pk'],['org_id','uuid'],['folder_id','uuid','fk'],['title','text'],['yjs_doc_key','text'],['schema_version','int'],['status','text'],['current_version_no','int'],['offline_enabled','bool'],['approval_policy_id','uuid FK NULL','fk'],['created_by','uuid','fk']],fk:['folders','users','approval_policies']},
+  // Group C — collaboration & review
+  {id:'suggestions',g:'C',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['author_id','uuid FK NULL','fk'],['origin','text'],['type','text'],['anchor','jsonb'],['status','text'],['reason','text'],['resolved_by','uuid FK NULL','fk']],fk:['documents','users']},
+  {id:'comments',g:'C',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['suggestion_id','uuid FK NULL','fk'],['anchor','jsonb NULL'],['author_id','uuid','fk'],['body','text'],['parent_comment_id','uuid FK NULL','fk']],fk:['documents','suggestions','users','comments']},
+  {id:'edit_attributions',g:'C',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['author_id','uuid','fk'],['type','text'],['anchor','jsonb'],['note','text']],fk:['documents','users']},
+  {id:'notifications',g:'C',cols:[['id','uuid','pk'],['org_id','uuid'],['user_id','uuid','fk'],['document_id','uuid','fk'],['type','text'],['payload','jsonb'],['delivered','bool']],fk:['users','documents']},
+  // Group D — versioning & approval
+  {id:'versions',g:'D',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['version_no','int'],['kind','text'],['s3_key','text'],['yjs_state_vector','bytea'],['created_by','uuid','fk']],fk:['documents','users']},
+  {id:'approval_markers',g:'D',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['approved_version_id','uuid','fk'],['yjs_state_vector','bytea'],['approved_by','uuid','fk']],fk:['documents','versions','users']},
+  {id:'approval_policies',g:'D',tag:'new',cols:[['id','uuid','pk'],['org_id','uuid'],['name','text'],['is_active','bool'],['created_by','uuid','fk']],fk:['users']},
+  {id:'approval_policy_steps',g:'D',tag:'new',cols:[['id','uuid','pk'],['org_id','uuid'],['policy_id','uuid','fk'],['step_no','int'],['required_role_id','uuid','fk'],['min_approvals','int'],['(policy_id,step_no)','UNIQUE','uq']],fk:['approval_policies','roles']},
+  {id:'approval_step_events',g:'D',tag:'new',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['version_id','uuid','fk'],['policy_id','uuid','fk'],['step_no','int'],['decision','text'],['actor_id','uuid','fk'],['note','text']],fk:['documents','versions','approval_policies','users']},
+  {id:'recommendations',g:'D',cols:[['id','uuid','pk'],['org_id','uuid'],['document_id','uuid','fk'],['version_id','uuid','fk'],['author_id','uuid','fk'],['anchor','jsonb'],['body','text'],['status','text']],fk:['documents','versions','users']},
+  {id:'recommendation_responses',g:'D',cols:[['id','uuid','pk'],['recommendation_id','uuid','fk'],['author_id','uuid','fk'],['body','text']],fk:['recommendations','users']},
+  // Group E — audit
+  {id:'audit_log',g:'E',cols:[['id','uuid','pk'],['org_id','uuid'],['actor_id','uuid','fk'],['document_id','uuid FK NULL','fk'],['action','text'],['target_type','text'],['target_id','uuid'],['metadata','jsonb']],fk:['users','documents']},
+];
+
+const GROUPS = {
+  A:{label:'Group A · Identity & access', color:'var(--A)'},
+  B:{label:'Group B · Content organization', color:'var(--B)'},
+  C:{label:'Group C · Collaboration & review', color:'var(--C)'},
+  D:{label:'Group D · Versioning & approval governance', color:'var(--D)'},
+  E:{label:'Group E · Audit', color:'var(--E)'},
+};
+const COLOR={A:'var(--A)',B:'var(--B)',C:'var(--C)',D:'var(--D)',E:'var(--E)'};
+
+const grid=document.getElementById('grid');
+const wires=document.getElementById('wires');
+const nodes={}; // id -> element
+
+// build DOM grouped
+let lastG=null;
+TABLES.forEach(t=>{
+  if(t.g!==lastG){
+    const gl=document.createElement('div');
+    gl.className='group-label';
+    gl.innerHTML=`${GROUPS[t.g].label} <span class="pill">${TABLES.filter(x=>x.g===t.g).length} tables</span>`;
+    grid.appendChild(gl); lastG=t.g;
+  }
+  const el=document.createElement('div');
+  el.className='table';
+  el.style.setProperty('--accent',COLOR[t.g]);
+  el.style.gridColumn='span 4';
+  el.dataset.id=t.id; el.dataset.group=t.g;
+  const tag = t.tag==='hub'?'<span class="tag hub">hub</span>': t.tag==='new'?'<span class="tag new">new</span>':'';
+  const cols = t.cols.map(c=>{
+    const cls = c[2]||'';
+    if(cls==='uq') return `<li class="uq"><span class="col">${c[0]}</span><span class="ty">${c[1]}</span></li>`;
+    return `<li class="${cls}"><span class="col">${c[0]}</span><span class="ty">${c[1]}</span></li>`;
+  }).join('');
+  const rels = t.fk.length? `<div class="relrow">→ references <b>${[...new Set(t.fk)].join('</b>, <b>')}</b></div>`:'';
+  el.innerHTML=`<div class="head"><span class="name">${t.id}</span>${tag}</div><ul class="cols">${cols}</ul>${rels}`;
+  grid.appendChild(el);
+  nodes[t.id]=el;
+  el.querySelector('.head').addEventListener('click',()=>{el.classList.toggle('open');requestAnimationFrame(draw);});
+});
+
+// ---- wire drawing ----
+function center(el){
+  const r=el.getBoundingClientRect();
+  const s=document.querySelector('.stage').getBoundingClientRect();
+  return {x:r.left-s.left, y:r.top-s.top, w:r.width, h:r.height,
+          cx:r.left-s.left+r.width/2, cy:r.top-s.top+r.height/2};
+}
+let WIRELIST=[];
+function draw(){
+  const stage=document.querySelector('.stage');
+  wires.setAttribute('width',stage.scrollWidth);
+  wires.setAttribute('height',stage.scrollHeight);
+  wires.innerHTML='';
+  WIRELIST=[];
+  TABLES.forEach(t=>{
+    const from=nodes[t.id];
+    [...new Set(t.fk)].forEach(tg=>{
+      const to=nodes[tg];
+      if(!to) return;
+      const a=center(from), b=center(to);
+      const self = t.id===tg;
+      let d;
+      if(self){
+        d=`M ${a.x+a.w-10} ${a.y+18} C ${a.x+a.w+46} ${a.y-6}, ${a.x+a.w+46} ${a.y+50}, ${a.x+a.w-10} ${a.y+30}`;
+      }else{
+        // edge anchor points: leave from bottom/top toward target
+        const x1=a.cx, y1=a.cy, x2=b.cx, y2=b.cy;
+        const mx=(x1+x2)/2;
+        d=`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+      }
+      const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+      p.setAttribute('d',d);
+      p.setAttribute('class','wire'+(self?' self':''));
+      p.dataset.from=t.id; p.dataset.to=tg;
+      wires.appendChild(p);
+      WIRELIST.push(p);
+    });
+  });
+}
+
+// ---- hover highlight ----
+function highlight(id){
+  const related=new Set([id]);
+  WIRELIST.forEach(p=>{
+    if(p.dataset.from===id||p.dataset.to===id){p.classList.add('hot');p.classList.remove('dim');related.add(p.dataset.from);related.add(p.dataset.to);}
+    else{p.classList.add('dim');p.classList.remove('hot');}
+  });
+  Object.entries(nodes).forEach(([k,el])=>{
+    if(related.has(k)){el.classList.add('hot');el.classList.remove('dim');}
+    else{el.classList.add('dim');el.classList.remove('hot');}
+  });
+}
+function clearHL(){
+  WIRELIST.forEach(p=>p.classList.remove('hot','dim'));
+  Object.values(nodes).forEach(el=>el.classList.remove('hot','dim'));
+}
+Object.entries(nodes).forEach(([id,el])=>{
+  el.addEventListener('mouseenter',()=>highlight(id));
+  el.addEventListener('mouseleave',clearHL);
+});
+
+// ---- legend group filter ----
+document.querySelectorAll('.lg').forEach(lg=>{
+  lg.addEventListener('click',()=>{
+    lg.classList.toggle('off');
+    const off=new Set([...document.querySelectorAll('.lg.off')].map(x=>x.dataset.group));
+    Object.values(nodes).forEach(el=>{
+      el.style.display = off.has(el.dataset.group)?'none':'';
+    });
+    document.querySelectorAll('.group-label').forEach(g=>{}); // labels stay
+    requestAnimationFrame(draw);
+  });
+});
+
+// init: open hubs by default for orientation
+['users','documents','approval_step_events'].forEach(id=>nodes[id]&&nodes[id].classList.add('open'));
+window.addEventListener('load',()=>requestAnimationFrame(draw));
+window.addEventListener('resize',()=>requestAnimationFrame(draw));
+setTimeout(draw,120);
+</script>
+</body>
+</html>
