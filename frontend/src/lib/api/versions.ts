@@ -1,52 +1,94 @@
+// =============================================================================
+// lib/api/versions.ts  —  REAL backend integration (was a localStorage stub).
+//
+// Talks to the FastAPI Versioning & Approval cluster via apiFetch (./client),
+// which adds the base URL + Bearer token. Backend routes (canonical):
+//   GET  /documents/:id/versions
+//   POST /documents/:id/submit-for-approval
+//   POST /versions/:id/restore
+//
+// NOTE: these calls require a valid auth token in localStorage["docflow.token"].
+// Until lib/api/auth.ts is wired to the real backend (to store a real JWT on
+// login), the backend will reject these with 401. See INTEGRATION_CHANGES.md.
+// =============================================================================
+
 import type { DocVersion } from "@/lib/types";
-import { latency, read, uid, write } from "@/lib/api/db";
-import { USERS } from "@/lib/api/seed";
+import { apiFetch } from "@/lib/api/client";
 
-const keyFor = (docId: string) => `versions:${docId}`;
-
-function name(id: string) {
-  return USERS.find((u) => u.id === id)?.name ?? "Someone";
+/** Raw row returned by the backend (VersionResponse). */
+interface VersionResponse {
+  id: string;
+  document_id: string;
+  version_no: number;
+  kind: "submission" | "approved";
+  created_by: string;
+  created_at: string;
+  s3_key: string;
 }
 
-function seed(docId: string): DocVersion[] {
-  const now = Date.now();
-  const at = (h: number) => new Date(now - h * 3_600_000).toISOString();
-  const versions: DocVersion[] = [
-    { id: uid("ver"), label: "Current version", createdAt: at(0), authorId: "you", authorName: name("you"), isCurrent: true },
-    { id: uid("ver"), label: "Edited by Sarah", createdAt: at(2), authorId: "sarah", authorName: name("sarah"), isCurrent: false },
-    { id: uid("ver"), label: "Status set to Working", createdAt: at(26), authorId: "you", authorName: name("you"), isCurrent: false },
-    { id: uid("ver"), label: "Initial draft", createdAt: at(72), authorId: "marcus", authorName: name("marcus"), isCurrent: false },
-  ];
-  write(keyFor(docId), versions);
-  return versions;
+function toDocVersion(v: VersionResponse, isCurrent: boolean): DocVersion {
+  const kindLabel = v.kind === "approved" ? "Approved" : "Submission";
+  return {
+    id: v.id,
+    label: `Version ${v.version_no} · ${kindLabel}`,
+    createdAt: v.created_at,
+    authorId: v.created_by,
+    // Backend returns the author id only; resolve to a display name once
+    // lib/api/users (GET /api/users) is wired. Shows the id for now.
+    authorName: v.created_by,
+    isCurrent,
+  };
 }
 
+/** List a document's version history (newest first). */
 export async function listVersions(docId: string): Promise<DocVersion[]> {
-  await latency();
-  return read<DocVersion[] | null>(keyFor(docId), null) ?? seed(docId);
+  const data = await apiFetch<{ versions: VersionResponse[] }>(
+    `/documents/${docId}/versions`,
+  );
+  // Backend orders version_no DESC, so the first row is the latest snapshot.
+  return data.versions.map((v, i) => toDocVersion(v, i === 0));
 }
 
-/** Snapshot the current doc as a new version entry. */
-export async function snapshotVersion(docId: string, label: string): Promise<DocVersion> {
-  await latency(120);
-  const list = read<DocVersion[] | null>(keyFor(docId), null) ?? seed(docId);
-  const entry: DocVersion = {
-    id: uid("ver"),
-    label,
+/**
+ * Snapshot the current doc as a new version.
+ *
+ * The backend has no generic "snapshot" endpoint — the only way to freeze a
+ * version is to submit it for approval (kind="submission"). So this maps to
+ * POST /documents/:id/submit-for-approval. `label` is currently ignored by the
+ * backend (it derives the label from version_no/kind).
+ */
+export async function snapshotVersion(
+  docId: string,
+  label: string,
+): Promise<DocVersion> {
+  const res = await apiFetch<{ version_id: string; version_no: number; message: string }>(
+    `/documents/${docId}/submit-for-approval`,
+    { method: "POST", body: "{}" },
+  );
+  return {
+    id: res.version_id,
+    label: label || `Version ${res.version_no} · Submission`,
     createdAt: new Date().toISOString(),
     authorId: "you",
-    authorName: name("you"),
+    authorName: "You",
     isCurrent: true,
   };
-  write(keyFor(docId), [entry, ...list.map((v) => ({ ...v, isCurrent: false }))]);
-  return entry;
 }
 
-export async function restoreVersion(docId: string, versionId: string): Promise<void> {
-  await latency();
-  const list = read<DocVersion[] | null>(keyFor(docId), null) ?? seed(docId);
-  write(
-    keyFor(docId),
-    list.map((v) => ({ ...v, isCurrent: v.id === versionId })),
-  );
+/**
+ * Restore a version.
+ *
+ * NOTE: the backend POST /versions/:id/restore is section-scoped
+ * (RestoreRequest.section_id), whereas the UI calls restoreVersion(docId,
+ * versionId) to restore a whole snapshot. We send section_id="full" as a
+ * stopgap — reconcile the semantics with the backend (see INTEGRATION_CHANGES).
+ */
+export async function restoreVersion(
+  _docId: string,
+  versionId: string,
+): Promise<void> {
+  await apiFetch(`/versions/${versionId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ section_id: "full" }),
+  });
 }
