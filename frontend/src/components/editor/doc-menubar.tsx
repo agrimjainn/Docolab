@@ -96,6 +96,7 @@ export function DocMenubar() {
           <MenubarItem onSelect={() => void a.makeCopy()}>Make a copy</MenubarItem>
           <MenubarSeparator />
           <MenubarItem onSelect={a.exportMarkdown}>Export as Markdown</MenubarItem>
+          <MenubarItem onSelect={() => void a.exportPdf()}>Export as PDF</MenubarItem>
           <MenubarItem onSelect={a.print}>
             Print<MenubarShortcut>⌘P</MenubarShortcut>
           </MenubarItem>

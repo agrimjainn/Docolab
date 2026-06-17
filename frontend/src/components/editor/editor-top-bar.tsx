@@ -16,7 +16,9 @@ import { useDocument } from "@/lib/store/document-store";
 export function EditorTopBar() {
   const {
     docId,
+    doc,
     title,
+    status,
     commentsOpen,
     toggleComments,
     shareOpen,
@@ -24,6 +26,13 @@ export function EditorTopBar() {
     versionsOpen,
     setVersionsOpen,
   } = useDocument();
+
+  const STATUS_TONE: Record<string, string> = {
+    Draft: "bg-surface-container text-text-secondary",
+    Working: "bg-accent-bg text-primary-container",
+    "Pending Review": "bg-status-warning/15 text-status-warning",
+    Approved: "bg-insertion-bg text-insertion-text",
+  };
 
   return (
     <header className="z-50 flex h-14 w-full shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-surface px-lg text-primary">
@@ -45,6 +54,20 @@ export function EditorTopBar() {
             <SaveStatus />
           </div>
         </div>
+
+        <button
+          onClick={() => setVersionsOpen(true)}
+          title="Version history"
+          className={cn(
+            "ml-1 hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 font-ui-xs text-ui-xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-container lg:flex",
+            STATUS_TONE[status] ?? "bg-surface-container text-text-secondary",
+          )}
+        >
+          <Icon name="history" size={14} />
+          {doc?.version ?? "v1.0"}
+          <span className="opacity-40">·</span>
+          {status}
+        </button>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
