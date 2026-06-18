@@ -193,6 +193,7 @@ class Document(Base):
     offline_enabled:    Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
     starred:            Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
     trashed:            Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
+    yjs_state:          Mapped[Optional[bytes]]  = mapped_column(BYTEA, nullable=True)
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     created_by:         Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:         Mapped[datetime]         = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
