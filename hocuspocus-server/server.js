@@ -18,6 +18,7 @@
 //   - All other hooks receive that returned `context` directly.
 
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
 import { Server } from "@hocuspocus/server";
 import { applyUpdate, encodeStateAsUpdate } from "yjs";
 import { verifyToken, getUserRole } from "./auth.js";
@@ -29,8 +30,14 @@ const PORT = parseInt(process.env.COLLAB_PORT ?? "1234", 10);
 // Real role set (roles table): owner / approver / editor / suggester / viewer.
 const READ_ONLY_ROLES = new Set(["viewer"]);
 
-const server = new Server({
-  port: PORT,
+/**
+ * Build (but do not start) the Hocuspocus server. Exported so tests can boot
+ * it on an ephemeral port against an injected in-memory database.
+ */
+export function buildServer({ port = PORT, quiet = false } = {}) {
+  return new Server({
+  port,
+  quiet, // suppress the start banner (used by tests)
   timeout: 30000, // disconnect idle clients after 30s
   debounce: 2000, // wait 2s of inactivity before calling onStoreDocument
   maxDebounce: 10000, // always store within 10s even if the client keeps typing
@@ -98,7 +105,14 @@ const server = new Server({
   async onDisconnect({ documentName, context }) {
     console.log(`[disconnect] doc=${documentName} user=${context?.user?.id ?? "unknown"}`);
   },
-});
+  });
+}
 
-server.listen();
-console.log(`Hocuspocus listening on ws://localhost:${PORT}`);
+// Only auto-start when run directly (node server.js), not when imported by tests.
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  const server = buildServer();
+  server.listen();
+  console.log(`Hocuspocus listening on ws://localhost:${PORT}`);
+}
