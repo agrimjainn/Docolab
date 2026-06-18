@@ -100,6 +100,13 @@ async def submit_for_approval(
 
     await check_permission(db, current_user.id, doc.id, "can_submit_for_approval")
 
+    # A trashed document cannot be submitted for approval.
+    if doc.trashed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot submit a trashed document for approval. Restore it first.",
+        )
+
     new_version_no = doc.current_version_no + 1
     version = Version(
         id=uuid.uuid4(),

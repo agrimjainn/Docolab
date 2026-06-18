@@ -100,6 +100,18 @@ async def update_document(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Folder not found")
         doc.folder_id = data.folder_id
 
+    if data.starred is not None:
+        doc.starred = data.starred
+
+    if data.trashed is not None:
+        # Guard: cannot trash a document that is pending approval.
+        if data.trashed and doc.status == "pending_approval":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot trash a document pending approval. Reject the submission first.",
+            )
+        doc.trashed = data.trashed
+
     await db.commit()
     await db.refresh(doc)
     return doc

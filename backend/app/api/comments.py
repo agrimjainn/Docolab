@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Comment, Suggestion
-from app.schemas.comment import CommentCreate, CommentOut, CommentListResponse
+from app.schemas.comment import CommentCreate, CommentOut, CommentListResponse, CommentResolve
 from app.services.auth_service import authorize
 
 router = APIRouter()
@@ -120,9 +120,60 @@ async def create_comment(
         anchor=data.anchor,
         author_id=current_user.id,
         body=data.body,
+        is_resolved=False,
         parent_comment_id=data.parent_comment_id,
     )
     db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+@router.patch(
+    "/comments/{id}/resolve",
+    response_model=CommentOut,
+)
+async def resolve_comment(
+    id: str,
+    data: CommentResolve,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark a comment thread as resolved or re-open it.
+    Only the comment author or a user with can_resolve_suggestion may resolve.
+    Replies (parent_comment_id IS NOT NULL) cannot be resolved directly —
+    resolve the root comment of the thread instead.
+    """
+    comment = (
+        await db.execute(
+            select(Comment).where(
+                Comment.id == id,
+                Comment.org_id == current_user.org_id,
+            )
+        )
+    ).scalars().first()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    # Only root comments (threads) can be resolved; not individual replies.
+    if comment.parent_comment_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot resolve a reply — resolve the root comment of the thread",
+        )
+
+    # Author or resolver role may toggle resolution.
+    is_author = comment.author_id == current_user.id
+    has_perm, _, _ = await authorize(
+        db, current_user.id, "can_resolve_suggestion", "document", str(comment.document_id)
+    )
+    if not is_author and not has_perm:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the comment author or a resolver may change resolution state",
+        )
+
+    comment.is_resolved = data.is_resolved
     await db.commit()
     await db.refresh(comment)
     return comment

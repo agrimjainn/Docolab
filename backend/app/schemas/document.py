@@ -10,6 +10,8 @@ class DocumentCreate(BaseModel):
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     folder_id: Optional[str] = None
+    starred: Optional[bool] = None
+    trashed: Optional[bool] = None
 
 class DocumentResponse(BaseModel):
     id: uuid.UUID
@@ -18,6 +20,8 @@ class DocumentResponse(BaseModel):
     status: str
     current_version_no: int
     yjs_doc_key: str
+    starred: bool
+    trashed: bool
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -30,6 +34,8 @@ class DocumentListItem(BaseModel):
     title: str
     status: str
     current_version_no: int
+    starred: bool
+    trashed: bool
     created_by: uuid.UUID
 
     class Config:

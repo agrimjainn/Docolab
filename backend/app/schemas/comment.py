@@ -24,10 +24,16 @@ class CommentOut(BaseModel):
     anchor: Optional[dict]
     author_id: uuid.UUID
     body: str
+    is_resolved: bool
     parent_comment_id: Optional[uuid.UUID]
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CommentResolve(BaseModel):
+    """Body for PATCH /comments/:id/resolve"""
+    is_resolved: bool
 
 
 class CommentListResponse(BaseModel):
