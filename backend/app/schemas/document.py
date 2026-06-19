@@ -10,7 +10,8 @@ class DocumentCreate(BaseModel):
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     folder_id: Optional[str] = None
-    starred: Optional[bool] = None
+    # NOTE: no `starred` here — bookmarks are personal; use PUT/DELETE
+    # /documents/{id}/star instead. `trashed` is the reversible recycle bin.
     trashed: Optional[bool] = None
 
 class DocumentResponse(BaseModel):
@@ -48,3 +49,7 @@ class AuthorizeCheckResponse(BaseModel):
     allowed: bool
     resolved_role: str | None
     via_scope: str | None
+
+class StarResponse(BaseModel):
+    document_id: uuid.UUID
+    starred: bool               # this user's personal bookmark state after the call

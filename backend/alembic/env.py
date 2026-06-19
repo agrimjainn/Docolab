@@ -97,7 +97,16 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    # When driven from application startup (main.py auto-migrate), the app
+    # passes its own already-open sync-wrapped connection via config.attributes
+    # so migrations run inside the app's event loop — no nested asyncio.run().
+    # When run from the CLI (`alembic upgrade head`), no connection is injected,
+    # so we spin up our own async engine.
+    connectable = context.config.attributes.get("connection", None)
+    if connectable is not None:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():
