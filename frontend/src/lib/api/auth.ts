@@ -12,7 +12,14 @@
 
 import type { User } from "@/lib/types";
 import { read, remove, write, latency } from "@/lib/api/db";
-import { apiFetch, setToken, clearToken } from "@/lib/api/client";
+import {
+  apiFetch,
+  setToken,
+  setRefreshToken,
+  getRefreshToken,
+  clearRefreshToken,
+  clearTokens,
+} from "@/lib/api/client";
 
 const KEY = "session";
 
@@ -36,7 +43,8 @@ interface UserResponse {
 
 interface AuthResult {
   user: UserResponse;
-  token: string;
+  token: string;          // short-lived access token (JWT)
+  refresh_token: string;  // long-lived refresh token (rotated on /auth/refresh)
 }
 
 /** Map the backend user onto the frontend User type. */
@@ -54,7 +62,8 @@ export function getCurrentUser(): User | null {
 }
 
 function establishSession(result: AuthResult): User {
-  setToken(result.token); // client.ts attaches this as the Bearer header
+  setToken(result.token);                 // client.ts attaches this as the Bearer header
+  setRefreshToken(result.refresh_token);  // used to silently refresh on 401
   const user = toUser(result.user);
   write(KEY, user);
   return user;
@@ -67,7 +76,8 @@ function establishSession(result: AuthResult): User {
  */
 function establishDemoSession(profile: { name: string; email: string }): User {
   const user: User = { id: "demo-admin", name: profile.name, email: profile.email };
-  setToken("demo-session"); // placeholder bearer; demo routes don't hit protected endpoints
+  setToken("demo-session");   // placeholder bearer; demo routes don't hit protected endpoints
+  clearRefreshToken();        // demo has no real session to refresh
   write(KEY, user);
   return user;
 }
@@ -144,6 +154,19 @@ export async function signInWithProvider(provider: Provider): Promise<User> {
 }
 
 export async function signOut(): Promise<void> {
-  clearToken();
+  // Best-effort server-side revoke of the refresh token, then always clear
+  // locally (so logout works even if the backend is unreachable).
+  const refresh = getRefreshToken();
+  if (refresh) {
+    try {
+      await apiFetch("/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+    } catch {
+      /* ignore — clear local state regardless */
+    }
+  }
+  clearTokens();
   remove(KEY);
 }

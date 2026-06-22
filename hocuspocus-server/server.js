@@ -27,7 +27,8 @@ import { loadDocument, storeDocument } from "./storage.js";
 const PORT = parseInt(process.env.COLLAB_PORT ?? "1234", 10);
 
 // Read-only roles — these users can receive updates but cannot push edits.
-// Real role set (roles table): owner / approver / editor / suggester / viewer.
+// Role set (roles table): owner / approver / editor / viewer. Only viewer is
+// read-only; editor/approver/owner can edit (matches RBAC can_edit_direct).
 const READ_ONLY_ROLES = new Set(["viewer"]);
 
 /**

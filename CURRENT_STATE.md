@@ -377,3 +377,50 @@ CHANGES ON 22/6
   - Added organization-level permission check for root documents (`"organization"` scope).
 - **Previous Behavior:** Documents were strictly required to be inside a folder, causing `400 Bad Request` or `403 Forbidden` errors if no `folder_id` was provided or if the user lacked specific folder-level assignments.
 - **New Behavior:** System now supports both folder-scoped documents and root-level documents (scoped to the user's organization).
+
+---
+
+## 15. Auth hardening — end-to-end session loop (P1 frontend + P2 backend)
+
+Closes the gap where the backend had real refresh/logout but the **frontend never used them**, plus backend hardening. No other features touched; all **10 backend suites** + a frontend session-logic check pass. **No schema change** (reuses `refresh_tokens` from `0004`).
+
+### P1 — Frontend session loop (now wired)
+- **`lib/api/client.ts`** — stores BOTH tokens (`docflow.token` + `docflow.refresh`); on a `401` it **silently refreshes once and retries** the request. A **single-flight** guard makes concurrent 401s share ONE `/auth/refresh` (otherwise parallel refreshes would double-rotate the token and trip the backend's reuse-detection → family revoke). The credential endpoints (`/auth/login|signup|refresh|logout`) are excluded from the retry; `/auth/me` is included. If refresh fails → clears tokens + redirects to `/login`.
+- **`lib/api/auth.ts`** — stores `refresh_token` on login/signup; **`signOut()` now calls `POST /auth/logout`** (best-effort) to revoke server-side, then clears local state. Demo sessions carry no refresh token.
+
+### P2 — Backend hardening
+- **`SECRET_KEY` is now set** in `.env`/`.env.example` (was silently falling back to an insecure hardcoded dev default). Must match the Hocuspocus `JWT_SECRET`.
+- **Access token shortened** to `ACCESS_TOKEN_EXPIRE_MINUTES=60` (was 24h) — safe now that the frontend auto-refreshes.
+- **Refresh-token pruning** (`token_service.prune_user_tokens`) — each login/refresh deletes that user's **expired** rows (keeps revoked-but-unexpired rows so reuse-detection still works), so `refresh_tokens` stays bounded without a cron.
+- **Email case-insensitivity fix** (`auth.py`) — signup stores lowercase and checks dupes case-insensitively (a different-case duplicate now → clean **409** instead of a **500** from the `lower(email)` unique index); login matches case-insensitively.
+
+### Validation
+- 10 backend suites pass, incl. new **`test_auth_session.py`** (email-case incl. 409-not-500, ~60m access-token expiry, prune deletes expired but keeps reuse-detection rows).
+- Frontend session logic verified against the **live backend**: expired-token→refresh→retry→200; **3 concurrent 401s → exactly ONE refresh** (no family-revoke); bad refresh → expired/redirect path. `client.ts` + `auth.ts` are `tsc` + `eslint` clean.
+
+---
+
+## 16. What's left for v1 completion
+
+Consolidated, current view (supersedes overlapping items in §7/§10):
+
+- **Auth / sessions — ✅ essentially complete.** Real signup/login/me/refresh/logout, wired end-to-end, rotation + reuse-detection + pruning, case-insensitive email, short access token. *Optional niceties:* rate-limit `/login`+`/refresh`; backend password-strength validation; instant access-token revocation (`token_version`/blocklist).
+- **RBAC / governance — ✅ complete.** 4 roles, scope-walk + org fallback, approval chain + snapshot, org-admin, ownership transfer, audit. (No API to create custom roles — by design; DB + migration only.)
+- **Real-time collaboration (Yjs/Hocuspocus) — built, configured & validated end-to-end (see §17).** Live two-client sync + RBAC read-only + persist/restart-reload all verified against real Postgres; collab RBAC now consistent with the backend. **Remaining:** live cursors/presence (awareness, not built) and cross-machine networking (run shared services on one host, point each client's env at its IP, firewall 8000+1234, add origins to `CORS_ORIGINS`).
+- **Frontend↔backend wiring still on mocks** (backend ready, UI not calling it): document browser list/rename/move/trash/star; comments/discussions; **suggestions** (`POST /documents/:id/suggestions` + accept/reject — needed for suggestions to be logged); sharing → `/assignments`+`/users` (map FE `commenter`→BE `viewer`/`editor`); OAuth/SSO + the `admin`/`admin` demo are local-only.
+- **Tier-2 infra (stubs):** real S3 cold-storage blobs (version `s3_key` points at nothing), content diff (`/diff`), export serializers, AI worker (`/ai/*`), notification push.
+- **Housekeeping:** consolidate the overlapping root `.md` files (the API-reference docs predate v2/v3).
+
+---
+
+## 17. Collab + auth-collab hardening (latest)
+
+Fixes/hardening after enabling collaboration. **No schema change.** Validated: backend **10/10** suites, collab **56/56** tests, plus live checks against real Postgres.
+
+- **Collab RBAC ↔ backend consistency (fix).** `hocuspocus-server/auth.js::getUserRole` now mirrors the backend's `resolve_role` exactly, including the **org-scope fallback** — an org-admin is now correctly an editor/owner in the live editor instead of wrongly read-only. Locked in by a unit test; also fixed a stale `suggester` comment in `server.js`.
+- **WS token refresh (fallback).** The Yjs provider's `token` is now a **function** (`yjs-kit.tsx` / `plate-editor.tsx`), so reconnects read the *current* access token — needed since access tokens are now short-lived (60m) and rotate. Verified live (provider invokes it and authenticates).
+- **New edge-case tests** (non-redundant): org-scoped-admin can edit (org fallback); concurrent edits from two clients both survive (CRDT merge + convergence). Already-covered cases (expired/wrong-secret/alg-confusion tokens, scope precedence, unknown-doc) were **not** re-added.
+- **Persist → restart → reload** verified **live against real Postgres** (a doc reloads its content after the collab server's memory is cleared). Intentionally not a pg-mem unit test — pg-mem can't faithfully round-trip the BYTEA into a decodable Yjs update (documented in the test).
+- **Config (gitignored, per-machine):** `hocuspocus-server/.env` (plain `postgresql://` URL + `JWT_SECRET` == backend `SECRET_KEY`), `frontend/.env.local` (`NEXT_PUBLIC_COLLAB_ENABLED=true`).
+
+**Still pending for collab:** live cursors/presence (awareness) and cross-machine networking.

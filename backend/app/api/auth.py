@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
@@ -12,7 +12,7 @@ from app.schemas.auth import (
 from app.api.deps import get_current_user
 from app.services.audit_service import record_audit, AuditAction
 from app.services.token_service import (
-    issue_refresh_token, rotate_refresh_token, revoke_refresh_token,
+    issue_refresh_token, rotate_refresh_token, revoke_refresh_token, prune_user_tokens,
 )
 
 router = APIRouter()
@@ -20,8 +20,12 @@ router = APIRouter()
 
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
+    # Normalise email to lowercase: the DB enforces case-insensitive uniqueness
+    # (unique index on lower(email)), so the duplicate check must match that or a
+    # different-case dupe slips past this 409 and dies on the index (500).
+    email = data.email.strip().lower()
     existing_user = (
-        await db.execute(select(User).where(User.email == data.email))
+        await db.execute(select(User).where(func.lower(User.email) == email))
     ).scalars().first()
     if existing_user:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -32,7 +36,7 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
     # org per user. Roles are granted via assignments (creator-owns on create).
     user = User(
         org_id=settings.DEFAULT_ORG_ID,
-        email=data.email,
+        email=email,
         password_hash=hashed_password,
         display_name=data.display_name,
         avatar_color="#7aa2f7",
@@ -54,8 +58,11 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+    # Case-insensitive match (mirrors the lower(email) unique index), so a user
+    # can log in regardless of how they cased their email at signup.
+    email = data.email.strip().lower()
     user = (
-        await db.execute(select(User).where(User.email == data.email))
+        await db.execute(select(User).where(func.lower(User.email) == email))
     ).scalars().first()
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
@@ -65,6 +72,7 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     token = create_access_token(subject=user.id)
     refresh_token = issue_refresh_token(db, user)
+    await prune_user_tokens(db, user.id)   # keep this user's token rows bounded
     record_audit(
         db, org_id=user.org_id, actor_id=user.id,
         action=AuditAction.LOGIN, target_type="user", target_id=user.id,

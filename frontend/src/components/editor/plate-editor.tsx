@@ -20,7 +20,6 @@ const CommentsPanel = dynamic(
 );
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
 import { getDiscussions } from "@/lib/api/comments";
-import { getToken } from "@/lib/api/client";
 
 export function PlateEditor({ docId }: { docId: string }) {
   return (
@@ -46,7 +45,6 @@ function Workspace({ routeDocId }: { routeDocId: string }) {
 const COLLAB_ENABLED = process.env.NEXT_PUBLIC_COLLAB_ENABLED === "true";
 
 function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId: string }) {
-  const token = getToken() ?? "";
   // The Hocuspocus room is the canonical document id from the route (the real
   // backend UUID), NOT the local metadata record id — they coincide once the
   // document store talks to the real API, but the route id is authoritative for
@@ -60,7 +58,7 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
     plugins: React.useMemo(
       () =>
         COLLAB_ENABLED
-          ? [...EditorKit, createYjsPlugin(routeDocId, token)]
+          ? [...EditorKit, createYjsPlugin(routeDocId)]
           : EditorKit,
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],

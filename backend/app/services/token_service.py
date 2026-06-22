@@ -21,7 +21,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -69,6 +69,24 @@ async def _revoke_family(db: AsyncSession, user_id) -> None:
     )
 
 
+async def prune_user_tokens(db: AsyncSession, user_id) -> None:
+    """Delete a user's EXPIRED refresh tokens so the table stays bounded.
+
+    Only expired rows are removed — they can never be used again (the expiry
+    check already rejects them), so dropping them loses nothing. Revoked-but-
+    unexpired rows are intentionally KEPT so reuse-detection still works within
+    the refresh window. Called on the recurring paths (login + refresh), scoped
+    to one user (indexed by user_id), so growth is bounded without a cron job.
+    The caller commits.
+    """
+    await db.execute(
+        delete(RefreshToken).where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.expires_at <= datetime.now(timezone.utc),
+        )
+    )
+
+
 async def rotate_refresh_token(db: AsyncSession, raw: str) -> tuple[User, str]:
     """Validate a refresh token and rotate it.
 
@@ -97,8 +115,10 @@ async def rotate_refresh_token(db: AsyncSession, raw: str) -> tuple[User, str]:
     if user is None or user.status == "disabled":
         raise _UNAUTHORIZED
 
-    # Rotate: revoke the presented token, mint a fresh one.
+    # Rotate: revoke the presented token, mint a fresh one. Prune this user's
+    # expired tokens while we're here so the refresh path keeps the table bounded.
     row.revoked = True
+    await prune_user_tokens(db, user.id)
     new_raw = issue_refresh_token(db, user)
     return user, new_raw
 

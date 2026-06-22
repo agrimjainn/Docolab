@@ -27,18 +27,20 @@ export async function verifyToken(token) {
 // ─────────────────────────────────────────────────────────────────────────────
 // getUserRole(userId, documentId) → role name string
 //
-// Mirrors app/services/auth_service.py::authorize() exactly:
-//   - Walks the scope hierarchy: document → its folder → parent folders,
-//     stopping at the FIRST assignment found.
-//   - Matches assignments by (user_id, scope_type, scope_id) only — the backend
-//     does NOT filter by org_id, so neither do we.
+// Mirrors app/services/auth_service.py::resolve_role EXACTLY — keep the two in
+// sync. The walk is: document → its folder → parent folders → ORG (terminal).
+// The org fall-through is essential: an org-admin holds only an org-scoped
+// assignment, so without it they'd be denied here (read-only) while the REST API
+// grants them access — a split-brain between the two networking layers.
+//   - Matches assignments by (user_id, scope_type, scope_id) only (single-org v1,
+//     like the backend — no org_id filter on the assignment lookup).
 //   - Returns "viewer" as a safe read-only default when no assignment is found.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function getUserRole(userId, documentId) {
   let scopeType = "document";
   let scopeId = documentId;
 
-  // Bounded walk up the folder tree (guard against cycles / very deep trees).
+  // Bounded walk up the scope hierarchy (guard against cycles / very deep trees).
   for (let depth = 0; depth < 64 && scopeId; depth++) {
     const assignment = await query(
       `SELECT r.name
@@ -52,24 +54,31 @@ export async function getUserRole(userId, documentId) {
     );
     if (assignment.rows.length > 0) return assignment.rows[0].name;
 
-    // No assignment at this scope — climb one level toward the root.
+    // No assignment at this scope — climb one level toward the org root.
     if (scopeType === "document") {
       const doc = await query(
         "SELECT folder_id FROM documents WHERE id = $1 LIMIT 1",
         [scopeId]
       );
       if (doc.rows.length === 0) break;
+      // folder_id may be NULL for a root-level document (matches resolve_role:
+      // a null folder ends the walk -> viewer).
       scopeType = "folder";
       scopeId = doc.rows[0].folder_id;
     } else if (scopeType === "folder") {
       const folder = await query(
-        "SELECT parent_folder_id FROM folders WHERE id = $1 LIMIT 1",
+        "SELECT parent_folder_id, org_id FROM folders WHERE id = $1 LIMIT 1",
         [scopeId]
       );
-      if (folder.rows.length === 0 || !folder.rows[0].parent_folder_id) break;
-      scopeId = folder.rows[0].parent_folder_id;
+      if (folder.rows.length === 0) break;
+      if (folder.rows[0].parent_folder_id) {
+        scopeId = folder.rows[0].parent_folder_id;        // climb to parent folder
+      } else {
+        scopeType = "org";                                // root folder -> org scope
+        scopeId = folder.rows[0].org_id;                  // (the resolve_role fix)
+      }
     } else {
-      break;
+      break; // "org" is terminal — it was already queried at the top of the loop
     }
   }
 

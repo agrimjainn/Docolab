@@ -154,4 +154,55 @@ describe("e2e: real provider ↔ server ↔ auth/storage ↔ pg-mem", () => {
       await h.teardown();
     }
   });
+
+  test("org-scoped owner can edit via the org fallback (no doc/folder grant)", async () => {
+    const h = await harness();
+    try {
+      // user-none's ONLY grant is org-scoped owner — must resolve to owner on any
+      // document via the org fallback (parity with the backend's resolve_role).
+      await query(
+        `INSERT INTO assignments (id, org_id, user_id, role_id, scope_type, scope_id)
+         VALUES ('a-org', $1, $2, $3, 'org', $1)`,
+        [ids.org, ids.users.none, ids.roles.owner]
+      );
+      const admin = h.connect(ids.docs.inChild, sign(ids.users.none));
+      const editor = h.connect(ids.docs.inChild, sign(ids.users.editor));
+      await sleep(500);
+      admin.doc.getText("content").insert(0, "org-admin-edit");
+      await sleep(500);
+      assert.ok(
+        editor.doc.getText("content").toString().includes("org-admin-edit"),
+        "org-scoped admin must NOT be read-only (org fallback grants owner)"
+      );
+    } finally {
+      await h.teardown();
+    }
+  });
+
+  // NOTE: the "persist → server-restart → reload from DB" path (a teammate edits,
+  // leaves, the doc unloads, a later joiner reloads it) is intentionally NOT a
+  // pg-mem unit test: pg-mem cannot faithfully round-trip the BYTEA back into a
+  // decodable Yjs update for the server's onLoadDocument path (decode throws),
+  // even though storeDocument↔loadDocument byte round-trips pass. That flow is
+  // verified against REAL Postgres (loadDocument decodes the stored bytes; a
+  // fresh client after a server restart receives the persisted content).
+
+  test("concurrent edits from two editors both survive (CRDT merge + convergence)", async () => {
+    const h = await harness();
+    try {
+      const a = h.connect(ids.docs.inChild, sign(ids.users.editor));
+      const b = h.connect(ids.docs.inChild, sign(ids.users.editor));
+      await sleep(500);
+      // both edit before either has synced — the classic concurrent conflict
+      a.doc.getText("content").insert(0, "AAA");
+      b.doc.getText("content").insert(0, "BBB");
+      await sleep(800);
+      const ta = a.doc.getText("content").toString();
+      const tb = b.doc.getText("content").toString();
+      assert.equal(ta, tb, "both clients must converge to the identical state");
+      assert.ok(ta.includes("AAA") && ta.includes("BBB"), "neither concurrent edit is lost");
+    } finally {
+      await h.teardown();
+    }
+  });
 });
