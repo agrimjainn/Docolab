@@ -199,5 +199,19 @@ MSW (`src/mocks/*`) kept but left disabled.
 With collab off, the editor opens a blank REST-fallback doc (content not
 persisted over REST).
 
-**Follow-ups**: comments write-through (POST/PATCH), Yjs-awareness presence,
-deep Yjs content duplication, backend `updated_at` on the document list item.
+**Production blockers resolved**
+- Auth route guard — `components/auth-guard.tsx` (client; `useSyncExternalStore`
+  on the token, redirects to `/login`). Wraps `/browser` + the editor.
+- Status/approval wiring — `document-store` now resolves the user's backend role
+  via `getMyAccess` and exposes `caps`/`uiRole`/`previewRole`; `RoleActions` +
+  `RoleBadge` are mounted in `editor-top-bar` (submit/approve/reject hit the real
+  versions API).
+- Comments write-through — `comments.ts` gained `createComment` (POST) +
+  `resolveComment` (PATCH); `discussion-sync` fires best-effort write-through
+  (backend ids reconcile on reload).
+- Collab fallback non-silent — editor toasts "Offline mode — changes won't be
+  saved" when `NEXT_PUBLIC_COLLAB_ENABLED` is off. Deploying Hocuspocus + the
+  env var remains an ops step.
+
+**Follow-ups**: Yjs-awareness presence, deep Yjs content duplication, backend
+`updated_at` on the document list item, comment-edit/delete write-through.

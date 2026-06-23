@@ -5,6 +5,16 @@ import type { Value } from "platejs";
 
 import type { DocStatus, DocumentRecord, SaveStatus } from "@/lib/types";
 import * as documentsApi from "@/lib/api/documents";
+import {
+  capsForRole,
+  getMyAccess,
+  toBackendRole,
+  toUiRole,
+  type BackendRole,
+  type Caps,
+  type UiRole,
+} from "@/lib/roles";
+import { getCurrentUser } from "@/lib/api/auth";
 
 const AUTOSAVE_DELAY = 1200;
 
@@ -24,6 +34,13 @@ interface DocumentContextValue {
   commentsOpen: boolean;
   shareOpen: boolean;
   versionsOpen: boolean;
+  /** Effective capabilities for the current (or previewed) role. */
+  caps: Caps;
+  /** UI role label for the signed-in user on this doc (null = no access yet). */
+  uiRole: UiRole | null;
+  /** Owner/Manager "preview as role" override (null = use the real role). */
+  previewRole: UiRole | null;
+  setPreviewRole: (r: UiRole | null) => void;
   setReadOnly: (v: boolean) => void;
   toggleComments: () => void;
   setCommentsOpen: (v: boolean) => void;
@@ -66,6 +83,8 @@ export function DocumentProvider({
   const [shareOpen, setShareOpen] = React.useState(false);
   const [versionsOpen, setVersionsOpen] = React.useState(false);
   const [resolvedId, setResolvedId] = React.useState(docId);
+  const [resolvedRole, setResolvedRole] = React.useState<BackendRole | null>(null);
+  const [previewRole, setPreviewRole] = React.useState<UiRole | null>(null);
 
   const contentRef = React.useRef<Value | null>(null);
   const titleRef = React.useRef("");
@@ -107,6 +126,22 @@ export function DocumentProvider({
       cancelled = true;
     };
   }, [docId]);
+
+  // Resolve the signed-in user's effective backend role on this document
+  // (folder inheritance included) via the backend authorize-check.
+  React.useEffect(() => {
+    let cancelled = false;
+    void getMyAccess(resolvedId)
+      .then((a) => {
+        if (!cancelled) setResolvedRole(a.backendRole);
+      })
+      .catch(() => {
+        /* backend unreachable — leave role unresolved (no-access caps) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedId]);
 
   const flush = React.useCallback(async () => {
     if (!loadedRef.current) return;
@@ -178,6 +213,14 @@ export function DocumentProvider({
     };
   }, []);
 
+  const me = getCurrentUser();
+  const isCreator = !!(doc && me && doc.ownerId === me.id);
+  const effectiveBackendRole: BackendRole | null = previewRole
+    ? toBackendRole(previewRole)
+    : resolvedRole;
+  const caps = capsForRole(effectiveBackendRole);
+  const uiRole = previewRole ?? toUiRole(resolvedRole, isCreator);
+
   const value = React.useMemo<DocumentContextValue>(
     () => ({
       docId: resolvedId,
@@ -191,6 +234,10 @@ export function DocumentProvider({
       commentsOpen,
       shareOpen,
       versionsOpen,
+      caps,
+      uiRole,
+      previewRole,
+      setPreviewRole,
       setReadOnly,
       toggleComments: () => setCommentsOpen((v) => !v),
       setCommentsOpen,
@@ -213,6 +260,9 @@ export function DocumentProvider({
       commentsOpen,
       shareOpen,
       versionsOpen,
+      caps,
+      uiRole,
+      previewRole,
       setTitle,
       setStatus,
       onContentChange,

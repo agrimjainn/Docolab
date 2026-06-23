@@ -65,6 +65,49 @@ function richFromBody(body: string): Value {
   return [{ type: "p", children: [{ text: body }] }];
 }
 
+/** Flatten a Plate rich value to plain text for the backend `body` field. */
+export function bodyFromRich(rich: Value | undefined): string {
+  if (!rich) return "";
+  const walk = (nodes: unknown[]): string =>
+    nodes
+      .map((n) => {
+        const node = n as { text?: string; children?: unknown[] };
+        if (typeof node.text === "string") return node.text;
+        if (Array.isArray(node.children)) return walk(node.children);
+        return "";
+      })
+      .join("");
+  return walk(rich as unknown[]).trim();
+}
+
+/** Create a comment on a document. Returns the backend comment id. */
+export async function createComment(
+  docId: string,
+  body: string,
+  opts?: { parentCommentId?: string; anchor?: Record<string, unknown> },
+): Promise<string> {
+  const res = await apiFetch<CommentOut>(`/documents/${docId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({
+      body,
+      parent_comment_id: opts?.parentCommentId ?? null,
+      anchor: opts?.anchor ?? null,
+    }),
+  });
+  return res.id;
+}
+
+/** Resolve / unresolve a comment thread (PATCH /comments/{id}/resolve). */
+export async function resolveComment(
+  commentId: string,
+  isResolved: boolean,
+): Promise<void> {
+  await apiFetch(`/comments/${commentId}/resolve`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_resolved: isResolved }),
+  });
+}
+
 /** Group flat backend comments into threaded discussions (root + replies). */
 function toDiscussions(comments: CommentOut[]): TDiscussion[] {
   const roots = comments.filter((c) => !c.parent_comment_id);
