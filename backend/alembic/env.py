@@ -63,7 +63,10 @@ def _get_url() -> str:
     return url
 
 
-config.set_main_option("sqlalchemy.url", _get_url())
+# configparser treats "%" as interpolation syntax, so a URL-encoded password
+# (e.g. "%40" for "@") must be escaped to "%%" here. ConfigParser un-escapes it
+# back to a single "%" when the value is read, so the engine gets the real URL.
+config.set_main_option("sqlalchemy.url", _get_url().replace("%", "%%"))
 
 
 # ---------------------------------------------------------------------------
