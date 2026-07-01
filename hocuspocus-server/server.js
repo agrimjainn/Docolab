@@ -24,7 +24,9 @@ import { applyUpdate, encodeStateAsUpdate } from "yjs";
 import { verifyToken, getUserRole } from "./auth.js";
 import { loadDocument, storeDocument } from "./storage.js";
 
-const PORT = parseInt(process.env.COLLAB_PORT ?? "1234", 10);
+// Render (and most PaaS hosts) assign the listen port via $PORT and route
+// traffic to it; COLLAB_PORT stays as the local-dev override.
+const PORT = parseInt(process.env.PORT ?? process.env.COLLAB_PORT ?? "1234", 10);
 
 // Read-only roles — these users can receive updates but cannot push edits.
 // Role set (roles table): owner / approver / editor / viewer. Only viewer is

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.deps import get_current_user
@@ -77,12 +77,11 @@ async def create_document(
         scope_id = data.folder_id
         effective_folder_id = data.folder_id
     else:
-        # User wants to create at Root level
-        # RBAC: check if they have permission to create at the Organization level
-        # (Assuming you use the Org ID as the scope for root documents)
-        await require_permission(db, current_user.id, "can_edit_direct", "org", current_user.org_id)
-        scope_type = "org"
-        scope_id = current_user.org_id
+        # User wants to create at Root level. Creating your OWN document is always
+        # allowed for any authenticated org member — the creator becomes its owner
+        # (see _grant_owner below). We deliberately do NOT require an org-wide edit
+        # grant here: org membership must not imply edit rights on the whole org's
+        # content (that is what broke per-user isolation).
         # documents.folder_id is NOT NULL in the DB, so root-level docs are parked
         # in the org's root folder (placeholder). Pick the earliest top-level folder.
         root_folder = (
@@ -142,13 +141,25 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List documents. Always org-isolated and hides permanently-deleted docs.
-    By default hides trashed docs too; pass ?trashed=true for the recycle bin.
-    ?starred=true returns only the current user's personal bookmarks. Omit
-    folder_id for an org-wide list (the browser's "all/starred/trash" views)."""
+    """List documents visible to the current user. Per-user isolation: a user
+    sees a document only if they CREATED it or hold an explicit document-scoped
+    assignment (i.e. it was shared with them). Org membership alone does NOT
+    expose other people's documents. Hides permanently-deleted docs; by default
+    hides trashed too (pass ?trashed=true for the recycle bin); ?starred=true
+    returns only the user's personal bookmarks."""
+    # Documents explicitly shared with this user (document-scoped assignments).
+    # These power the browser's "Shared with me" view alongside the user's own.
+    shared_doc_ids = select(Assignment.scope_id).where(
+        Assignment.user_id == current_user.id,
+        Assignment.scope_type == "document",
+    )
     query = select(Document).where(
-        Document.org_id == current_user.org_id,   # org isolation
+        Document.org_id == current_user.org_id,   # tenant isolation
         Document.status != "deleted",             # hide permanently-deleted
+        or_(
+            Document.created_by == current_user.id,   # docs I own
+            Document.id.in_(shared_doc_ids),          # docs shared with me
+        ),
     )
     if folder_id is not None:
         query = query.where(Document.folder_id == folder_id)

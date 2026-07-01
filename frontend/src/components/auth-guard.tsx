@@ -27,9 +27,20 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const hasToken = useHasToken();
 
+  // Only redirect once the component has mounted on the client. On the very
+  // first post-hydration render, useSyncExternalStore returns the SERVER
+  // snapshot (false) to match the SSR HTML before switching to the real client
+  // snapshot. Redirecting in that window bounced authenticated users to /login
+  // on every hard load / refresh. Gating on `mounted` defers the decision by
+  // one render, by which point the token snapshot reflects localStorage.
+  const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => {
-    if (!hasToken) router.replace("/login");
-  }, [hasToken, router]);
+    setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (mounted && !hasToken) router.replace("/login");
+  }, [mounted, hasToken, router]);
 
   if (!hasToken) return null;
   return <>{children}</>;
