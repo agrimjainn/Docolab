@@ -1,14 +1,18 @@
 // =============================================================================
-// lib/api/snapshots.ts — version-content store, backed by the REAL backend.
+// lib/api/snapshots.ts — permanent version history, backed by the REAL backend.
 //
 //   GET  /documents/{id}/versions   list version rows (metadata, no content)
 //   GET  /versions/{id}             one version incl. its frozen Slate content
-//   POST /documents/{id}/versions   freeze the current content (kind=snapshot)
 //
-// Replaces the old localStorage store (which was per-browser, seeded with demo
-// data, and invisible to collaborators). Version content now lives on the
-// backend `versions.content` JSONB column, so history/diff/restore work for
-// every user on every device.
+// Only submit-for-approval (kind=submission) and approve (kind=approved)
+// create rows here — this is the permanent, append-only tier. There is
+// deliberately no manual "save a version" write path: an unbounded number of
+// user-triggered snapshots would defeat the point of tiered storage. The
+// "kind='snapshot'" case below is read-only backward compatibility for rows
+// created by an earlier build's manual-save feature (now removed); new rows
+// of that kind are never created. The single mutable "current state when
+// nobody's online" backup lives on documents.content_snapshot instead — see
+// lib/api/documents.ts::saveCurrentSnapshot.
 // =============================================================================
 
 import type { Value } from "platejs";
@@ -97,17 +101,4 @@ export async function getSnapshot(
   } catch {
     return null;
   }
-}
-
-/** Freeze the current content as a new version (kind='snapshot'). */
-export async function saveSnapshot(
-  docId: string,
-  value: Value,
-): Promise<DocSnapshot> {
-  const v = await apiFetch<VersionRow>(`/documents/${docId}/versions`, {
-    method: "POST",
-    body: JSON.stringify({ content: value }),
-  });
-  const names = await authorNames();
-  return toSnapshot(v, names);
 }

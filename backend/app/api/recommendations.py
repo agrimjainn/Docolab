@@ -28,6 +28,7 @@ from app.schemas.recommendation import (
 )
 from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
+from app.services.notification_service import notify_recommendation_created
 
 router = APIRouter()
 
@@ -108,6 +109,10 @@ async def create_recommendation(
     )
     db.add(rec)
     await db.flush()
+    await notify_recommendation_created(
+        db, doc_id=version.document_id, org_id=current_user.org_id,
+        version=version, author_id=current_user.id,
+    )
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
         action=AuditAction.RECOMMENDATION_CREATE, target_type="recommendation",

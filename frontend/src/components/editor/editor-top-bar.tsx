@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Icon } from "@/components/icon";
 import { DocMenubar } from "@/components/editor/doc-menubar";
@@ -10,6 +11,7 @@ import { DocTitle, SaveStatus } from "@/components/editor/doc-title";
 import { PresenceStack } from "@/components/editor/presence-stack";
 import { DocOverflowMenu } from "@/components/editor/doc-overflow-menu";
 import { RoleActions, RoleBadge } from "@/components/editor/role-actions";
+import { NotificationBell } from "@/components/notification-bell";
 import { cn } from "@/lib/utils";
 import { useDocument } from "@/lib/store/document-store";
 
@@ -44,11 +46,35 @@ export function EditorTopBar() {
     setShareOpen,
     versionsOpen,
     setVersionsOpen,
+    recommendationsOpen,
+    setRecommendationsOpen,
     caps,
   } = useDocument();
 
   // Snapshot id being compared against the current version (full-screen overlay).
   const [compareId, setCompareId] = React.useState<string | null>(null);
+
+  // Deep-link support: a notification click navigates to
+  // /editor?doc=...&open=versions|compare|recommendations[&compareVersion=id],
+  // which this reads once on mount to open the right surface, then strips
+  // from the URL so a refresh doesn't keep re-triggering it.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  /* eslint-disable react-hooks/set-state-in-effect -- intentional one-time deep-link consumption on mount */
+  React.useEffect(() => {
+    const open = searchParams.get("open");
+    if (!open) return;
+    if (open === "versions") setVersionsOpen(true);
+    else if (open === "compare") {
+      const v = searchParams.get("compareVersion");
+      if (v) setCompareId(v);
+      else setVersionsOpen(true); // no version id — fall back to the list
+    } else if (open === "recommendations") setRecommendationsOpen(true);
+    router.replace(`${pathname}?doc=${docId}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const STATUS_TONE: Record<string, string> = {
     Draft: "bg-surface-container text-text-secondary",
@@ -113,6 +139,25 @@ export function EditorTopBar() {
         >
           <Icon name="forum" fill={commentsOpen} size={20} />
         </button>
+
+        {caps.canViewHistory && (
+          <button
+            onClick={() => setRecommendationsOpen(!recommendationsOpen)}
+            aria-label="Toggle reviewer feedback"
+            aria-pressed={recommendationsOpen}
+            title="Reviewer feedback"
+            className={cn(
+              "flex size-8 items-center justify-center rounded-full transition-colors",
+              recommendationsOpen
+                ? "bg-accent-bg text-primary-container"
+                : "text-on-surface-variant hover:bg-surface-container",
+            )}
+          >
+            <Icon name="rate_review" fill={recommendationsOpen} size={20} />
+          </button>
+        )}
+
+        <NotificationBell />
 
         {caps.canManageMembers && (
           <button

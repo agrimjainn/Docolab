@@ -43,7 +43,9 @@ export default function SignUpPage() {
       {/* Left: branding — vertically centered like the login page so the copy
           doesn't hang at the bottom edge of the viewport. */}
       <div className="relative hidden w-1/2 flex-col justify-center overflow-hidden border-r border-border-subtle bg-[#ECEEF2] p-xxl lg:flex">
-        <div className="relative z-10 w-full max-w-md">
+        {/* max-w-md resolves to 12px in this project's Tailwind v4 config, not
+            the default 28rem (see CLAUDE.md) — use an explicit width instead. */}
+        <div className="relative z-10 w-full max-w-[420px]">
           <div className="mb-xxl flex items-center gap-sm">
             <Icon name="note_stack" className="text-[32px] text-primary-container" />
             <span className="font-display-sm text-display-sm font-bold tracking-tight text-text-primary">

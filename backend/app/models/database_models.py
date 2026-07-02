@@ -203,6 +203,11 @@ class Document(Base):
     # NOTE: there is intentionally no `starred` column — bookmarks are PERSONAL
     # (per-user) and live in the document_stars table (see DocumentStar).
     yjs_state:          Mapped[Optional[bytes]]  = mapped_column(BYTEA, nullable=True)
+    # IDLE-tier storage: a single, OVERWRITTEN (never appended) snapshot of the
+    # last-known-good content, refreshed on explicit save (Ctrl+S) and on
+    # leaving the document. Distinct from `versions` (permanent/append-only)
+    # so casual editing never bloats version history. NULL until first save.
+    content_snapshot:   Mapped[Optional[list]]   = mapped_column(JSONB, nullable=True)
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     created_by:         Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:         Mapped[datetime]         = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

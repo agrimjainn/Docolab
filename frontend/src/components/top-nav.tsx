@@ -16,8 +16,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NotificationBell } from "@/components/notification-bell";
 import * as auth from "@/lib/api/auth";
-import * as notifications from "@/lib/api/notifications";
 
 const initials = (name: string) =>
   name
@@ -51,20 +51,6 @@ export function TopNav({
     router.push("/");
   };
 
-  const checkNotifications = async () => {
-    try {
-      const items = await notifications.listNotifications(); // unread-only by default
-      const unread = items.length;
-      toast.info(
-        unread > 0
-          ? `You have ${unread} unread notification${unread === 1 ? "" : "s"}`
-          : "You're all caught up — no new notifications",
-      );
-    } catch {
-      toast.error("Couldn't load notifications");
-    }
-  };
-
   return (
     <header className="z-50 flex h-14 w-full shrink-0 items-center justify-between border-b border-border-subtle bg-surface px-lg py-sm text-primary">
       <div className="flex items-center gap-xl">
@@ -89,13 +75,7 @@ export function TopNav({
           />
         </div>
 
-        <button
-          onClick={() => void checkNotifications()}
-          aria-label="Notifications"
-          className="flex size-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container"
-        >
-          <Icon name="notifications" />
-        </button>
+        <NotificationBell />
 
         <DropdownMenu>
           <DropdownMenuTrigger

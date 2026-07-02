@@ -11,6 +11,7 @@ from app.models.database_models import Document, DocumentStar, User, Folder, Rol
 from app.schemas.document import (
     DocumentCreate, DocumentResponse, DocumentListResponse,
     AuthorizeCheckResponse, DocumentUpdate, StarResponse,
+    ContentSnapshotUpdate, ContentSnapshotResponse,
 )
 from app.services.auth_service import authorize, require_permission
 from app.services.audit_service import record_audit, AuditAction
@@ -353,6 +354,31 @@ async def unstar_document(id: str, db: AsyncSession = Depends(get_db), current_u
         )
         await db.commit()
     return {"document_id": doc.id, "starred": False}
+
+
+@router.put("/{id}/snapshot", response_model=ContentSnapshotResponse)
+async def save_content_snapshot(
+    id: str,
+    data: ContentSnapshotUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Overwrite the single IDLE-tier content snapshot (never appends — this
+    is NOT a new version). Called on explicit save (Ctrl+S) and when a client
+    leaves the document, so the latest known-good content survives even when
+    nobody is currently connected, without accumulating history rows."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    await require_permission(db, current_user.id, "can_edit_direct", "document", id)
+
+    doc.content_snapshot = data.content
+    await db.commit()
+    await db.refresh(doc)
+    return {"document_id": doc.id, "saved_at": doc.updated_at}
 
 
 @router.get("/{id}/authorize-check", response_model=AuthorizeCheckResponse)

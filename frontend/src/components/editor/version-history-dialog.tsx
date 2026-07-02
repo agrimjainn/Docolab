@@ -13,12 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Icon } from "@/components/icon";
 import * as versions from "@/lib/api/versions";
-import {
-  getSnapshot,
-  getSnapshots,
-  saveSnapshot,
-  type DocSnapshot,
-} from "@/lib/api/snapshots";
+import { getSnapshot, getSnapshots, type DocSnapshot } from "@/lib/api/snapshots";
 import { useDocumentOptional } from "@/lib/store/document-store";
 
 function when(iso: string) {
@@ -52,7 +47,6 @@ export function VersionHistoryDialog({
 
   const [list, setList] = React.useState<DocSnapshot[] | null>(null);
   const [restoring, setRestoring] = React.useState<string | null>(null);
-  const [saving, setSaving] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
 
   const load = React.useCallback(() => {
@@ -71,20 +65,6 @@ export function VersionHistoryDialog({
       cancelled = true;
     };
   }, [open, docId]);
-
-  // Capture the live editor content as a new backend version (kind=snapshot).
-  const saveCurrent = async () => {
-    setSaving(true);
-    try {
-      await saveSnapshot(docId, structuredClone(editor.children));
-      toast.success("Saved current version");
-      load();
-    } catch {
-      toast.error("Couldn't save version");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   // Submit for owner approval — freezes the live content on the submission row.
   const submit = async () => {
@@ -139,33 +119,23 @@ export function VersionHistoryDialog({
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle className="font-ui-lg text-ui-lg">Version history</DialogTitle>
           <DialogDescription className="font-ui-sm text-ui-sm">
-            Save a version, restore an earlier snapshot, or compare any version
-            against the current document.
+            Submit for approval to freeze a permanent version, restore an
+            earlier one, or compare any version against the current document.
+            The current live state is always backed up automatically — no
+            manual save needed.
           </DialogDescription>
         </DialogHeader>
 
-        {(canEdit || canSubmit) && (
+        {canSubmit && (
           <div className="flex gap-2 px-6 pb-3">
-            {canEdit && (
-              <button
-                onClick={() => void saveCurrent()}
-                disabled={saving}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border-subtle px-4 py-2 font-ui-sm text-ui-sm font-semibold text-text-primary transition-colors hover:bg-surface-container disabled:opacity-60"
-              >
-                <Icon name="bookmark_add" size={16} />
-                {saving ? "Saving…" : "Save version"}
-              </button>
-            )}
-            {canSubmit && (
-              <button
-                onClick={() => void submit()}
-                disabled={submitting}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2 font-ui-sm text-ui-sm font-semibold text-on-primary transition-colors hover:bg-accent-hover disabled:opacity-60"
-              >
-                <Icon name="send" size={16} />
-                {submitting ? "Submitting…" : "Submit for approval"}
-              </button>
-            )}
+            <button
+              onClick={() => void submit()}
+              disabled={submitting}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2 font-ui-sm text-ui-sm font-semibold text-on-primary transition-colors hover:bg-accent-hover disabled:opacity-60"
+            >
+              <Icon name="send" size={16} />
+              {submitting ? "Submitting…" : "Submit for approval"}
+            </button>
           </div>
         )}
 
@@ -196,7 +166,7 @@ export function VersionHistoryDialog({
             ))}
           {list?.length === 0 && (
             <p className="px-3 py-6 text-center font-ui-sm text-ui-sm text-text-muted">
-              No saved versions yet. Use “Save version” to create one.
+              No versions yet. Submit for approval to create the first one.
             </p>
           )}
           {list?.map((v) => (

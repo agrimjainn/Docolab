@@ -31,6 +31,7 @@ interface DocumentContextValue {
   commentsOpen: boolean;
   shareOpen: boolean;
   versionsOpen: boolean;
+  recommendationsOpen: boolean;
   /** Effective capabilities for the current (or previewed) role. */
   caps: Caps;
   /** UI role label for the signed-in user on this doc (null = no access yet). */
@@ -46,6 +47,7 @@ interface DocumentContextValue {
   setCommentsOpen: (v: boolean) => void;
   setShareOpen: (v: boolean) => void;
   setVersionsOpen: (v: boolean) => void;
+  setRecommendationsOpen: (v: boolean) => void;
   setTitle: (t: string) => void;
   setStatus: (s: DocStatus) => void;
   onContentChange: (value: Value) => void;
@@ -82,6 +84,7 @@ export function DocumentProvider({
   const [commentsOpen, setCommentsOpen] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [versionsOpen, setVersionsOpen] = React.useState(false);
+  const [recommendationsOpen, setRecommendationsOpen] = React.useState(false);
   const [resolvedId, setResolvedId] = React.useState(docId);
   const [resolvedRole, setResolvedRole] = React.useState<BackendRole | null>(null);
   const [previewRole, setPreviewRole] = React.useState<UiRole | null>(null);
@@ -289,6 +292,7 @@ export function DocumentProvider({
       commentsOpen,
       shareOpen,
       versionsOpen,
+      recommendationsOpen,
       caps,
       uiRole,
       realUiRole,
@@ -299,6 +303,7 @@ export function DocumentProvider({
       setCommentsOpen,
       setShareOpen,
       setVersionsOpen,
+      setRecommendationsOpen,
       setTitle,
       setStatus,
       onContentChange,
@@ -316,6 +321,7 @@ export function DocumentProvider({
       commentsOpen,
       shareOpen,
       versionsOpen,
+      recommendationsOpen,
       caps,
       uiRole,
       realUiRole,

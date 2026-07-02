@@ -13,12 +13,20 @@ import { Editor, EditorContainer } from "@/components/ui/editor";
 import { EditorTopBar } from "@/components/editor/editor-top-bar";
 import { getCurrentUser } from "@/lib/api/auth";
 import { buildCursorIdentity } from "@/lib/presence-identity";
+import { saveCurrentSnapshot } from "@/lib/api/documents";
 
-// The comments panel is only mounted when the user opens it, so keep it out of
-// the initial editor chunk and load it on demand.
+// Comments and Recommendations panels are only mounted when the user opens
+// them, so keep them out of the initial editor chunk and load on demand.
 const CommentsPanel = dynamic(
   () =>
     import("@/components/editor/comments-panel").then((m) => m.CommentsPanel),
+  { ssr: false },
+);
+const RecommendationsPanel = dynamic(
+  () =>
+    import("@/components/editor/recommendations-panel").then(
+      (m) => m.RecommendationsPanel,
+    ),
   { ssr: false },
 );
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
@@ -70,7 +78,13 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
       [],
     ),
   });
-  const { readOnly, commentsOpen, saveNow } = useDocument();
+  const { readOnly, commentsOpen, recommendationsOpen, saveNow, caps } = useDocument();
+  // Latest caps in a ref so the yjs cleanup effect (deps: []) can read them at
+  // unmount time without re-subscribing to every caps change.
+  const canEditRef = React.useRef(caps.canEdit);
+  React.useEffect(() => {
+    canEditRef.current = caps.canEdit;
+  }, [caps.canEdit]);
   // With skipInitialization the editor starts with empty children and
   // PlateContent renders null. yjs.init() populates children asynchronously,
   // but nothing re-renders the tree when it finishes — onReady flips this state
@@ -81,16 +95,30 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   // for a document (yjs_state is NULL server-side) the shared doc is empty, so
   // we seed it from the REST `content` we already loaded. Once content lives in
   // Yjs, that seed is ignored (init only seeds when the shared doc is empty).
+  //
+  // React StrictMode (dev only) runs this effect, its cleanup, then the effect
+  // again — synchronously, before any of init()'s internal awaits resolve. Two
+  // real bugs follow from that if handled naively:
+  //   1. Calling init() twice creates a duplicate provider/WebSocket.
+  //   2. Calling destroy() on the phantom first cleanup runs BEFORE init() ever
+  //      reaches YjsEditor.connect() (which registers the Y.Doc observer), so
+  //      the internal unobserveDeep() call removes a listener that was never
+  //      added — Yjs logs "[yjs] Tried to remove event handler that doesn't
+  //      exist." (harmless, but noisy and trips the Next.js error overlay).
+  // Fix: init() runs at most once (guarded by a ref); destroy() is deferred by
+  // one macrotask so the (synchronous) StrictMode remount can cancel it before
+  // it fires. In production there's no double-invoke, so the timer always
+  // fires and this behaves like a normal single init/destroy pair.
   const yjsInitedRef = React.useRef(false);
+  const destroyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
     const yjs = editor.getApi(YjsPlugin).yjs;
-    // init() exactly once per editor instance. React StrictMode (dev) runs
-    // this effect twice on the same editor; a second init() would create a
-    // duplicate provider/WebSocket and spam "[yjs] Tried to remove event
-    // handler" on cleanup. On the re-run just (re)connect the providers.
-    if (yjsInitedRef.current) {
-      yjs.connect();
-    } else {
+    if (destroyTimerRef.current) {
+      // This is the StrictMode remount — cancel the phantom teardown and reuse
+      // the still-live (or still-initializing) binding from the first run.
+      clearTimeout(destroyTimerRef.current);
+      destroyTimerRef.current = null;
+    } else if (!yjsInitedRef.current) {
       yjsInitedRef.current = true;
       void yjs.init({
         id: doc.id,
@@ -107,22 +135,40 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
       /* awareness not ready yet — autoSend will publish on first selection */
     }
     return () => {
-      yjs.destroy();
+      // This timeout only actually fires on a REAL unmount (a StrictMode
+      // phantom-unmount's synchronous remount cancels it above) — so it's
+      // also the right, once-only place to push a final IDLE-tier content
+      // snapshot for "leaving the document" (see saveCurrentSnapshot).
+      destroyTimerRef.current = setTimeout(() => {
+        destroyTimerRef.current = null;
+        if (canEditRef.current) {
+          void saveCurrentSnapshot(doc.id, structuredClone(editor.children)).catch(() => {
+            /* best-effort backup write — Yjs's own persistence is the source of truth */
+          });
+        }
+        yjs.destroy();
+      }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ⌘S / Ctrl+S flushes a manual save (title/status metadata; content is Yjs).
+  // ⌘S / Ctrl+S flushes a manual save: title/status metadata (content is
+  // Yjs-owned and already continuously persisted) PLUS an explicit refresh of
+  // the single IDLE-tier content snapshot, so "Save" always leaves behind an
+  // up-to-date backup even if nobody is online later.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void saveNow();
+        if (canEditRef.current) {
+          void saveCurrentSnapshot(doc.id, structuredClone(editor.children)).catch(() => {});
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [saveNow]);
+  }, [saveNow, doc.id, editor]);
 
   return (
     <Plate editor={editor}>
@@ -139,6 +185,7 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
             />
           </EditorContainer>
           {commentsOpen && <CommentsPanel />}
+          {recommendationsOpen && <RecommendationsPanel />}
         </div>
       </div>
     </Plate>

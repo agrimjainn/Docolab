@@ -9,6 +9,7 @@ import { useEditor } from "@/components/editor/editor-kit";
 import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { useDocActions } from "@/components/editor/use-doc-actions";
 import { useDocument } from "@/lib/store/document-store";
+import { saveCurrentSnapshot } from "@/lib/api/documents";
 import {
   Menubar,
   MenubarContent,
@@ -27,6 +28,7 @@ export function DocMenubar() {
   const router = useRouter();
   const a = useDocActions();
   const {
+    docId,
     readOnly,
     setReadOnly,
     commentsOpen,
@@ -34,7 +36,17 @@ export function DocMenubar() {
     setShareOpen,
     setVersionsOpen,
     saveNow,
+    caps,
   } = useDocument();
+
+  // Same "Save" contract as ⌘S in plate-editor.tsx: flush title/status, and
+  // (if the user can edit) refresh the single IDLE-tier content snapshot.
+  const save = React.useCallback(() => {
+    void saveNow();
+    if (caps.canEdit) {
+      void saveCurrentSnapshot(docId, structuredClone(editor.children)).catch(() => {});
+    }
+  }, [saveNow, caps.canEdit, docId, editor]);
 
   const showAiEdits = usePluginOption(aiAttributionPlugin, "show") as boolean;
 
@@ -94,7 +106,7 @@ export function DocMenubar() {
         <MenubarContent align="start">
           <MenubarItem onSelect={() => router.push("/editor")}>New document</MenubarItem>
           <MenubarItem onSelect={() => router.push("/browser")}>Open…</MenubarItem>
-          <MenubarItem onSelect={() => void saveNow()}>
+          <MenubarItem onSelect={save}>
             Save<MenubarShortcut>⌘S</MenubarShortcut>
           </MenubarItem>
           <MenubarItem onSelect={() => void a.makeCopy()}>Make a copy</MenubarItem>

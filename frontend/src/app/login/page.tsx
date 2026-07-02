@@ -45,7 +45,7 @@ export default function LoginPage() {
               <Icon name="description" fill className="text-[20px] text-on-primary" />
             </div>
             <span className="font-display-sm text-display-sm font-bold tracking-tight text-primary">
-              Docflow
+              Docolab
             </span>
           </div>
           <h1 className="mb-xl font-display-lg text-display-lg text-text-primary">

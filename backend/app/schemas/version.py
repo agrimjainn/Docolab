@@ -37,12 +37,6 @@ class VersionMetadataResponse(BaseModel):
         from_attributes = True
 
 
-class SnapshotCreateRequest(BaseModel):
-    """Body for POST /documents/{id}/versions — freeze the current content as
-    a named version WITHOUT entering the approval flow (kind='snapshot')."""
-    content: Optional[list] = None
-
-
 class DiffResponse(BaseModel):
     from_version_no: int
     to_version_no: int

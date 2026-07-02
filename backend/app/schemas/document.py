@@ -55,3 +55,12 @@ class AuthorizeCheckResponse(BaseModel):
 class StarResponse(BaseModel):
     document_id: uuid.UUID
     starred: bool               # this user's personal bookmark state after the call
+
+class ContentSnapshotUpdate(BaseModel):
+    """Body for PUT /documents/{id}/snapshot — overwrite the single IDLE-tier
+    content snapshot. Not a new version; always replaces the prior value."""
+    content: list
+
+class ContentSnapshotResponse(BaseModel):
+    document_id: uuid.UUID
+    saved_at: datetime
