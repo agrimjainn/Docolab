@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { useEditorRef } from "platejs/react";
 
 import { Icon } from "@/components/icon";
 import {
@@ -18,6 +19,7 @@ import { useDocument } from "@/lib/store/document-store";
 import type { UiRole } from "@/lib/roles";
 import { listVersions, submitForApproval, approveVersion, rejectVersion } from "@/lib/api/versions";
 import { createRecommendation } from "@/lib/api/recommendations";
+import { isBlankValue } from "@/lib/api/seed";
 
 const ROLE_TONE: Record<UiRole, string> = {
   Owner: "bg-insertion-bg text-insertion-text",
@@ -102,6 +104,11 @@ export function RoleBadge() {
  */
 export function RoleActions() {
   const { docId, caps } = useDocument();
+  // RoleActions renders inside <Plate>, so this is the LIVE (Yjs-canonical)
+  // editor. Freeze its content on submit so the resulting version is diffable
+  // in history — omitting it froze `content: null`, which made every
+  // top-bar-submitted version show "nothing to compare".
+  const editor = useEditorRef();
   const [submitting, setSubmitting] = React.useState(false);
   const [pendingVersionId, setPendingVersionId] = React.useState<string | null>(null);
   const [pendingVersionNo, setPendingVersionNo] = React.useState<number | null>(null);
@@ -124,9 +131,14 @@ export function RoleActions() {
   }, [refreshPending]);
 
   const onSubmit = async () => {
+    const content = structuredClone(editor.children);
+    if (isBlankValue(content)) {
+      toast.error("Document is empty — add content before submitting for approval.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const res = await submitForApproval(docId);
+      const res = await submitForApproval(docId, content);
       toast.success(res.message || `Submitted version ${res.versionNo} for review`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not submit for review");

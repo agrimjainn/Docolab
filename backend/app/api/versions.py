@@ -23,6 +23,36 @@ from app.services.notification_service import (
 router = APIRouter()
 
 
+# --- content helpers --------------------------------------------------------
+
+def _is_empty_paragraph(node) -> bool:
+    if not isinstance(node, dict) or node.get("type") != "p":
+        return False
+    children = node.get("children") or []
+    return all(
+        isinstance(c, dict)
+        and isinstance(c.get("text"), str)
+        and c["text"].strip() == ""
+        for c in children
+    )
+
+
+def _is_blank_value(content) -> bool:
+    """True when a Slate value has nothing worth freezing — missing, an empty
+    list, or only empty paragraphs. Any non-paragraph block (image, table,
+    heading, …) counts as content. Mirrors frontend seed.ts::isBlankValue.
+
+    Blank content is normalized to NULL on the version row so it renders as the
+    well-handled "no content captured" state (nothing to compare) instead of a
+    non-null-but-contentless snapshot that would diff as an all-inserted doc.
+    Callers that intentionally omit content (headless approval-flow submits)
+    are unaffected — they already send null and stay null.
+    """
+    if not isinstance(content, list) or len(content) == 0:
+        return True
+    return all(_is_empty_paragraph(n) for n in content)
+
+
 # --- approval-chain helpers -------------------------------------------------
 
 async def _load_chain_state(db: AsyncSession, version_id, policy_id):
@@ -160,12 +190,15 @@ async def submit_for_approval(
         )
     ).scalars().first() or 0
     new_version_no = max(max_no, doc.current_version_no) + 1
+    # Normalize blank/empty content to NULL (see _is_blank_value) so a
+    # contentless submission never freezes a misleading snapshot.
+    frozen_content = None if _is_blank_value(data.content) else data.content
     version = Version(
         id=uuid.uuid4(), org_id=current_user.org_id, document_id=doc.id,
         version_no=new_version_no, kind="submission",
         s3_key=f"versions/{doc.id}/v{new_version_no}", created_by=current_user.id,
         # Frozen content at submit time (the editor sends its live Yjs value).
-        content=data.content,
+        content=frozen_content,
         # Snapshot the policy at submit time so the in-flight chain is
         # deterministic even if the doc's policy is edited/detached mid-review.
         approval_policy_id=doc.approval_policy_id,

@@ -14,6 +14,7 @@ import {
 import { Icon } from "@/components/icon";
 import * as versions from "@/lib/api/versions";
 import { getSnapshot, getSnapshots, type DocSnapshot } from "@/lib/api/snapshots";
+import { isBlankValue } from "@/lib/api/seed";
 import { useDocumentOptional } from "@/lib/store/document-store";
 
 function when(iso: string) {
@@ -68,9 +69,14 @@ export function VersionHistoryDialog({
 
   // Submit for owner approval — freezes the live content on the submission row.
   const submit = async () => {
+    const content = structuredClone(editor.children);
+    if (isBlankValue(content)) {
+      toast.error("Document is empty — add content before submitting for approval.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await versions.submitForApproval(docId, structuredClone(editor.children));
+      await versions.submitForApproval(docId, content);
       toast.success("Submitted for approval");
       ctx?.setStatus("Pending Review");
       load();

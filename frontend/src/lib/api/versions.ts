@@ -58,11 +58,14 @@ export async function listVersions(docId: string): Promise<DocVersion[]> {
  */
 export async function submitForApproval(
   docId: string,
-  content?: Value,
+  content: Value,
 ): Promise<{ versionId: string; versionNo: number; message: string }> {
+  // `content` is required: freezing a submission without the live editor value
+  // produced a `content: null` version that showed "nothing to compare" in the
+  // diff view. Callers pass the live (Yjs-canonical) editor children.
   const res = await apiFetch<{ version_id: string; version_no: number; message: string }>(
     `/documents/${docId}/submit-for-approval`,
-    { method: "POST", body: JSON.stringify({ content: content ?? null }) },
+    { method: "POST", body: JSON.stringify({ content }) },
   );
   return { versionId: res.version_id, versionNo: res.version_no, message: res.message };
 }
