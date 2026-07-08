@@ -25,7 +25,7 @@ from sqlalchemy import select, delete, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import verify_password, create_access_token
+from app.core.security import verify_password, create_access_token, get_password_hash
 from app.api.deps import require_org_admin
 from app.models.database_models import (
     User, Document, Folder, Role, Assignment, DocumentFolder, AiModel, AiUsageEvent,
@@ -33,6 +33,7 @@ from app.models.database_models import (
 from app.schemas.auth import Token
 from app.schemas.admin import (
     AdminLoginRequest, AdminUserItem, AdminUserListResponse, MembershipUpdateRequest,
+    AdminUserCreate,
     AdminDocItem, AdminDocListResponse,
     DocAccessEntry, DocAccessListResponse, DocAccessUpsertRequest,
     FolderCheckItem, DocFoldersResponse, SetDocFoldersRequest,
@@ -199,6 +200,53 @@ async def admin_list_users(
         )
         for u in users
     ])
+
+
+@router.post("/users", response_model=AdminUserItem, status_code=status.HTTP_201_CREATED)
+async def admin_create_user(
+    data: AdminUserCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_org_admin),
+):
+    """Requirement 4 (add side): the admin creates a new member in their org.
+    Mirrors auth.signup — lowercased/unique email, hashed password, active
+    status, and NO org-wide role (per-user isolation). The user can then be
+    assigned to documents from here or the document panel."""
+    email = data.email.strip().lower()
+    if not data.display_name.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Display name is required")
+    if len(data.password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 8 characters")
+
+    existing = (
+        await db.execute(select(User).where(func.lower(User.email) == email))
+    ).scalars().first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    user = User(
+        org_id=admin.org_id,
+        email=email,
+        password_hash=get_password_hash(data.password),
+        display_name=data.display_name.strip(),
+        avatar_color=(data.avatar_color or "#7aa2f7"),
+        status="active",
+    )
+    db.add(user)
+    await db.flush()
+    record_audit(
+        db, org_id=admin.org_id, actor_id=admin.id,
+        action=AuditAction.USER_SIGNUP, target_type="user", target_id=user.id,
+        meta={"admin": True, "created_email": user.email},
+    )
+    await db.commit()
+    await db.refresh(user)
+    return AdminUserItem(
+        id=user.id, email=user.email, display_name=user.display_name,
+        avatar_color=user.avatar_color, status=user.status,
+        online=is_online(user.last_seen_at), last_seen_at=user.last_seen_at,
+        created_at=user.created_at,
+    )
 
 
 @router.patch("/users/{user_id}/membership", response_model=AdminUserItem)

@@ -39,6 +39,16 @@ class MembershipUpdateRequest(BaseModel):
     active: bool
 
 
+class AdminUserCreate(BaseModel):
+    # Admin-created org member. Like signup, the new user joins the admin's org
+    # with NO org-wide role (per-user isolation) — access to documents comes only
+    # from explicit assignments.
+    email: EmailStr
+    display_name: str
+    password: str
+    avatar_color: Optional[str] = None
+
+
 # --- documents ----------------------------------------------------------------
 
 class AdminDocItem(BaseModel):
