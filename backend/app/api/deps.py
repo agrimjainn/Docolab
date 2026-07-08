@@ -31,3 +31,23 @@ async def get_current_user(db: AsyncSession = Depends(get_db), token: str = Depe
     if user.status == "disabled":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is disabled")
     return user
+
+
+async def require_org_admin(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Dependency guarding the Admin surface. An "admin" is a user holding an
+    ORG-scoped role with can_manage_members (see auth_service.is_org_admin) — the
+    same explicit signal used elsewhere, NOT inferred from folder/document
+    ownership. Every /api/admin/* route depends on this."""
+    # Imported here (not at module top) to avoid a circular import: auth_service
+    # pulls in models that already import from this package.
+    from app.services.auth_service import is_org_admin
+
+    if not await is_org_admin(db, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator privileges required",
+        )
+    return current_user

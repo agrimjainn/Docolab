@@ -42,3 +42,14 @@ class AIJobStatusResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AIResolveResponse(BaseModel):
+    """The vendor+model the editor should use for a document. Resolved from the
+    document's assigned model against the org's enabled catalog, falling back to
+    the org default. Contains NO API key — keys live only on the AI gateway."""
+    document_id: str
+    vendor: str
+    model_key: str
+    display_name: str
+    is_fallback: bool   # true if the doc's assigned model was missing/disabled

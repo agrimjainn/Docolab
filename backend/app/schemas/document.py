@@ -23,6 +23,9 @@ class DocumentResponse(BaseModel):
     yjs_doc_key: str
     starred: bool
     trashed: bool
+    # Admin-assignable AI model for this document (default 'gemini'). Optional so
+    # older callers/response consumers are unaffected.
+    ai_model: Optional[str] = None
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime

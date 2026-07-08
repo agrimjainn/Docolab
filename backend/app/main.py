@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import engine, SessionLocal
 from app.models.database_models import Role, RolePermission, User, Assignment, Folder
 from app.core.security import get_password_hash
+from app.services.ai_model_service import seed_org_catalog
 from app.api import auth, roles, folders, assignments, documents, users, versions, notifications, ai, export
 # Person A (collaboration cluster): suggestions, comments, recommendations, audit
 from app.api import suggestions, comments, recommendations, audit
@@ -17,6 +18,8 @@ from app.api import suggestions, comments, recommendations, audit
 from app.api import ownership
 # Governance: dynamic approval policies (chains)
 from app.api import approval_policies
+# Docolab Admin page (org-wide admin surface) + presence heartbeat
+from app.api import admin, presence
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -65,6 +68,10 @@ app.include_router(recommendations.router, prefix=settings.API_STR, tags=["Recom
 app.include_router(audit.router, prefix=settings.API_STR, tags=["Audit"])
 app.include_router(ownership.router, prefix=settings.API_STR, tags=["Ownership"])
 app.include_router(approval_policies.router, prefix=settings.API_STR, tags=["Approval Policies"])
+# Admin surface (all routes under /api/admin, guarded by require_org_admin) +
+# presence heartbeat (any authenticated user pings /api/presence/heartbeat).
+app.include_router(admin.router, prefix=f"{settings.API_STR}/admin", tags=["Admin"])
+app.include_router(presence.router, prefix=f"{settings.API_STR}/presence", tags=["Presence"])
 
 
 # Role -> permission seed set for the single v1 org.
@@ -130,6 +137,11 @@ async def startup_event():
                     for p in perms:
                         db.add(RolePermission(role_id=role.id, permission=p))
                 await db.commit()
+
+            # Seed the org AI-model catalog (idempotent). Governs which models an
+            # admin may assign to documents; Gemini enabled by default.
+            await seed_org_catalog(db, org_id)
+            await db.commit()
 
             # Seed the first owner + a real root folder
             admin = (

@@ -56,6 +56,10 @@ class User(Base):
     display_name:  Mapped[str]       = mapped_column(Text, nullable=False)
     avatar_color:  Mapped[Optional[str]] = mapped_column(Text)
     status:        Mapped[str]       = mapped_column(Text, nullable=False, server_default="active")
+    # PRESENCE: last time this user pinged the heartbeat endpoint. NULL = never
+    # seen. "online" is a derived value (last_seen_at within a short window) —
+    # computed in the presence service, not stored, so it can't go stale.
+    last_seen_at:  Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at:    Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at:    Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -208,6 +212,10 @@ class Document(Base):
     # leaving the document. Distinct from `versions` (permanent/append-only)
     # so casual editing never bloats version history. NULL until first save.
     content_snapshot:   Mapped[Optional[list]]   = mapped_column(JSONB, nullable=True)
+    # AI model the editor should use for this document. Admin-assignable
+    # (Admin page, per-doc); defaults to a Gemini model so existing behaviour is
+    # unchanged. Free-form string so new model ids need no migration.
+    ai_model:           Mapped[str]              = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     created_by:         Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:         Mapped[datetime]         = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -226,6 +234,9 @@ class Document(Base):
     recommendations:  Mapped[list["Recommendation"]]= relationship(back_populates="document", cascade="all, delete-orphan")
     audit_logs:       Mapped[list["AuditLog"]]       = relationship(back_populates="document")
     stars:            Mapped[list["DocumentStar"]]   = relationship(back_populates="document", cascade="all, delete-orphan")
+    # Additional folder placements (a doc can live in many folders — Admin page).
+    # The canonical/primary location stays `folder_id`; these are extra pointers.
+    folder_links:     Mapped[list["DocumentFolder"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_documents_folder", "folder_id"),
@@ -253,6 +264,61 @@ class DocumentStar(Base):
 
     __table_args__ = (
         Index("idx_document_stars_user", "user_id"),
+    )
+
+
+class DocumentFolder(Base):
+    """
+    Many-to-many placement of a document into ADDITIONAL folders (beyond its
+    canonical `documents.folder_id`). Lets the Admin file one document under
+    several folders at once (the Folder(s) checkbox dropdown).
+
+    Kept deliberately separate from `documents.folder_id` so nothing that reads
+    the single primary location breaks — this table is purely additive. The
+    effective set of a document's folders = {folder_id} ∪ these rows.
+    Composite PK (document_id, folder_id) makes placement idempotent.
+    """
+    __tablename__ = "document_folders"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    folder_id:   Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), primary_key=True)
+    org_id:      Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at:  Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document: Mapped["Document"] = relationship(back_populates="folder_links")
+
+    __table_args__ = (
+        Index("idx_document_folders_folder", "folder_id"),
+    )
+
+
+class AiModel(Base):
+    """
+    Org-scoped catalog of AI models an admin may assign to documents. This is
+    the governed allow-list behind documents.ai_model — a doc stores a
+    `model_key` (e.g. 'gemini-2.5-flash') that must resolve to an ENABLED row
+    here. Vendor API keys are NOT stored here (they live only on the AI gateway
+    service); this table records only which vendor+model are permitted.
+
+    `is_default` marks the org fallback used when a document's assigned model is
+    missing or disabled, so AI never hard-fails on a stale value.
+    UNIQUE (org_id, model_key) keeps the catalog free of duplicates.
+    """
+    __tablename__ = "ai_models"
+
+    id:           Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    org_id:       Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    vendor:       Mapped[str]       = mapped_column(Text, nullable=False)   # google / openai / anthropic / ...
+    model_key:    Mapped[str]       = mapped_column(Text, nullable=False)   # e.g. gemini-2.5-flash
+    display_name: Mapped[str]       = mapped_column(Text, nullable=False)
+    enabled:      Mapped[bool]      = mapped_column(Boolean, nullable=False, server_default="true")
+    is_default:   Mapped[bool]      = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at:   Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at:   Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "model_key", name="uq_ai_models_org_key"),
+        Index("idx_ai_models_org", "org_id"),
     )
 
 

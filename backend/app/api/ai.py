@@ -7,12 +7,48 @@ from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Recommendation, Suggestion
 from app.schemas.ai import (
     AISuggestRequest, AISuggestResponse, ApplyAIRecommendationRequest,
-    ApplyAIRecommendationResponse, AIJobStatusResponse
+    ApplyAIRecommendationResponse, AIJobStatusResponse, AIResolveResponse,
 )
 from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
+from app.services import ai_model_service
 
 router = APIRouter()
+
+
+@router.get("/documents/{id}/ai/resolve", response_model=AIResolveResponse)
+async def resolve_ai_model(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Tell the editor which vendor+model to use for this document (backend
+    governs the choice; the client must NOT pick its own). Returns the
+    document's assigned model resolved against the org's ENABLED catalog, with
+    fallback to the org default. No API key is returned — the AI gateway holds
+    keys and is handed a backend-issued grant separately (Phase 2)."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc or doc.status == "deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Invoking AI is a suggest-level action; gate the resolve on the same right.
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
+
+    resolved = await ai_model_service.resolve(db, current_user.org_id, doc.ai_model)
+    if resolved is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No AI model is enabled for this organization",
+        )
+    return AIResolveResponse(
+        document_id=str(doc.id),
+        vendor=resolved.vendor,
+        model_key=resolved.model_key,
+        display_name=resolved.display_name,
+        is_fallback=(resolved.model_key != doc.ai_model),
+    )
 
 
 @router.post("/documents/{id}/ai/suggest", response_model=AISuggestResponse)
