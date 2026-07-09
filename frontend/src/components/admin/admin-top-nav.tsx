@@ -58,7 +58,7 @@ export function AdminTopNav({
       </div>
 
       {/* Search */}
-      <div className="relative mx-8 hidden max-w-xl flex-1 md:flex">
+      <div className="relative mx-8 hidden max-w-[576px] flex-1 md:flex">
         <Icon
           name="search"
           className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--gl-on-surface-variant)]"

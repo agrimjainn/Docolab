@@ -57,6 +57,8 @@ export interface AdminDoc {
   creator_name?: string | null;
   created_at: string;
   updated_at: string;
+  // Target user's role on this doc — only set by userDocuments() (null elsewhere).
+  role_name?: BackendRole | null;
 }
 
 export interface DocAccessEntry {

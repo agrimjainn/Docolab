@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   userDocuments,
   assignDocumentToUser,
+  upsertDocAccess,
   removeDocAccess,
   setMembership,
   ROLE_OPTIONS,
@@ -80,6 +81,20 @@ export function UserModal({
             ? e.message
             : "Failed to remove",
       );
+    }
+  };
+
+  // Change this user's role on one document. Optimistic — roll back on failure.
+  const changeRole = async (d: AdminDoc, role: BackendRole) => {
+    const prev = d.role_name ?? null;
+    setDocs((cur) => cur?.map((x) => (x.id === d.id ? { ...x, role_name: role } : x)) ?? cur);
+    try {
+      await upsertDocAccess(d.id, user.id, role);
+      onChanged();
+      toast.success(`${user.display_name} is now ${ROLE_LABELS[role]} on "${d.title}"`);
+    } catch (e) {
+      setDocs((cur) => cur?.map((x) => (x.id === d.id ? { ...x, role_name: prev } : x)) ?? cur);
+      toast.error(e instanceof ApiError ? e.message : "Failed to change role");
     }
   };
 
@@ -214,13 +229,36 @@ export function UserModal({
                         {isCreator ? "Created by this user" : "Shared with this user"}
                       </p>
                     </div>
+                    {/* Per-document role. The creator always owns (creator-owns),
+                        so their role is fixed at Owner and the picker is locked. */}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span className="text-xs text-[var(--gl-on-surface-variant)]">Role</span>
+                      <select
+                        value={d.role_name ?? (isCreator ? "owner" : "")}
+                        disabled={isCreator}
+                        onChange={(ev) => changeRole(d, ev.target.value as BackendRole)}
+                        title={isCreator ? "Creator — owns this document" : "Change role"}
+                        className="gl-select w-28 rounded-lg px-2 py-1.5 text-xs disabled:opacity-60"
+                      >
+                        {!d.role_name && !isCreator && <option value="">— none —</option>}
+                        {ROLE_OPTIONS.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <button
                       onClick={() => removeDoc(d)}
                       disabled={isCreator}
-                      title={isCreator ? "Creator — manage in the document panel" : "Remove access"}
-                      className="gl-btn gl-btn-ghost h-8 w-8 rounded-lg p-0 disabled:opacity-30"
+                      title={
+                        isCreator
+                          ? "Creator owns this document — remove by deleting or transferring it"
+                          : "Remove access"
+                      }
+                      className="gl-btn gl-btn-ghost h-8 w-8 shrink-0 rounded-lg p-0 disabled:opacity-30"
                     >
-                      <Icon name="link_off" className="text-[18px]" />
+                      <Icon name="delete" className="text-[18px]" />
                     </button>
                   </div>
                 );

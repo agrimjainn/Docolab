@@ -63,6 +63,9 @@ class AdminDocItem(BaseModel):
     creator_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # The target user's role on this doc — only populated by the per-user
+    # documents endpoint (None in the org-wide list, where "role" is per-user).
+    role_name: Optional[str] = None
 
 
 class AdminDocListResponse(BaseModel):

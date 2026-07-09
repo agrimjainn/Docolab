@@ -301,7 +301,20 @@ async def admin_user_documents(
             )
         )
     ).scalars().all()
-    return await _docs_to_response(db, admin.org_id, docs)
+    # The user's explicit document-scoped role per doc (for the inline dropdown).
+    # Docs they only created (no assignment) resolve to owner via creator-owns.
+    role_rows = (
+        await db.execute(
+            select(Assignment.scope_id, Role.name)
+            .join(Role, Role.id == Assignment.role_id)
+            .where(Assignment.user_id == target.id, Assignment.scope_type == "document")
+        )
+    ).all()
+    role_by_doc = {str(scope_id): name for scope_id, name in role_rows}
+    for d in docs:
+        if str(d.id) not in role_by_doc and d.created_by == target.id:
+            role_by_doc[str(d.id)] = "owner"
+    return await _docs_to_response(db, admin.org_id, docs, role_by_doc)
 
 
 @router.post("/users/{user_id}/assign-document", response_model=OkResponse)
@@ -324,8 +337,15 @@ async def admin_assign_document_to_user(
 # documents: org-wide list + search (requirements 1, 3)
 # ---------------------------------------------------------------------------
 
-async def _docs_to_response(db: AsyncSession, org_id, docs) -> AdminDocListResponse:
-    """Attach creator email/name to a batch of documents for the admin list."""
+async def _docs_to_response(
+    db: AsyncSession, org_id, docs, role_by_doc: Optional[dict] = None,
+) -> AdminDocListResponse:
+    """Attach creator email/name to a batch of documents for the admin list.
+
+    `role_by_doc` (keyed by str(document_id)) optionally supplies a specific
+    user's role per document — used by the per-user documents endpoint so the
+    UI can show/change that user's role inline.
+    """
     creator_ids = {d.created_by for d in docs}
     creators = {}
     if creator_ids:
@@ -342,6 +362,7 @@ async def _docs_to_response(db: AsyncSession, org_id, docs) -> AdminDocListRespo
             creator_email=c.email if c else None,
             creator_name=c.display_name if c else None,
             created_at=d.created_at, updated_at=d.updated_at,
+            role_name=(role_by_doc.get(str(d.id)) if role_by_doc else None),
         ))
     return AdminDocListResponse(documents=items)
 

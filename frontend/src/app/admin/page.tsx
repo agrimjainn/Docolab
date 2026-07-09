@@ -84,7 +84,9 @@ function AdminDashboard() {
 
       <AdminTopNav search={search} onSearch={setSearch} />
 
-      <main className="relative z-10 min-h-screen w-full pt-16">
+      {/* Root <body> is h-screen + overflow-hidden (editor app), so the dashboard
+          must own its own scroll or content past the fold gets clipped. */}
+      <main className="relative z-10 h-screen w-full overflow-y-auto pt-16">
         <div className="px-8 py-6 pb-2">
           <h1 className="flex items-center gap-3 text-2xl font-semibold tracking-tight text-[var(--gl-on-surface)]">
             <span className="h-6 w-1.5 rounded-full bg-[var(--gl-primary)] shadow-[0_0_10px_rgba(125,211,252,0.6)]" />

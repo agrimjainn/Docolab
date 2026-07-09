@@ -142,7 +142,7 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
-        className="gl-card w-full max-w-sm space-y-4 p-6"
+        className="gl-card w-full max-w-[420px] space-y-4 p-6"
       >
         <div className="flex items-center gap-2">
           <Icon name="person_add" className="text-xl text-[var(--gl-primary)]" />
