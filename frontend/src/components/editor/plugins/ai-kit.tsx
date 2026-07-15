@@ -6,6 +6,7 @@ import {
   AIChatPlugin,
   AIPlugin,
   applyAISuggestions,
+  CopilotPlugin,
   getInsertPreviewStart,
   streamInsertChunk,
   useChatChunk,
@@ -100,9 +101,34 @@ export const aiChatPlugin = AIChatPlugin.extend({
   },
 });
 
+export const copilotPlugin = CopilotPlugin.configure({
+  options: {
+    api: '/api/ai/command',
+    getPrompt: ({ editor }) => {
+      const block = editor.api.block({ highest: true });
+      return editor.api.serializeMd(block);
+    },
+    triggerQuery: ({ editor }) => {
+      const selection = editor.selection;
+      if (!selection) return false;
+      
+      const path = selection.focus.path;
+      const node = editor.api.node(path);
+      if (!node) return false;
+      
+      return selection.focus.offset > 0;
+    },
+  },
+  shortcuts: {
+    accept: { keys: 'tab' },
+    acceptNextWord: { keys: 'ctrl+right' },
+  },
+});
+
 export const AIKit = [
   ...CursorOverlayKit,
   ...MarkdownKit,
   AIPlugin.withComponent(AILeaf),
   aiChatPlugin,
+  copilotPlugin,
 ];

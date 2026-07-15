@@ -9,6 +9,7 @@ import { YjsPlugin } from "@platejs/yjs/react";
 import type { DocumentRecord } from "@/lib/types";
 import { EditorKit } from "@/components/editor/editor-kit";
 import { createYjsPlugin } from "@/components/editor/plugins/yjs-kit";
+import { autocompletePlugin } from "@/components/editor/plugins/autocomplete-kit";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { EditorTopBar } from "@/components/editor/editor-top-bar";
 import { getCurrentUser } from "@/lib/api/auth";
@@ -163,6 +164,14 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
         void saveNow();
         if (canEditRef.current) {
           void saveCurrentSnapshot(doc.id, structuredClone(editor.children)).catch(() => {});
+        }
+      }
+      // Tab to accept autocomplete suggestion
+      if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const autocompleteApi = editor.getApi(autocompletePlugin)?.copilot;
+        if (autocompleteApi?.suggestionText) {
+          e.preventDefault();
+          autocompleteApi.accept();
         }
       }
     };
