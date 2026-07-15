@@ -11,6 +11,7 @@ from app.models.database_models import Document, DocumentStar, User, Folder, Rol
 from app.schemas.document import (
     DocumentCreate, DocumentResponse, DocumentListResponse,
     AuthorizeCheckResponse, DocumentUpdate, StarResponse,
+    ContentSnapshotUpdate, ContentSnapshotResponse,
 )
 from app.services.auth_service import authorize, require_permission
 from app.services.audit_service import record_audit, AuditAction
@@ -180,7 +181,7 @@ async def list_documents(
 
 @router.get("/{id}", response_model=DocumentResponse)
 async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Get a single document by ID"""
+    """Get a single document by ID (requires read access on the document)."""
     try:
         uuid.UUID(id)
     except ValueError:
@@ -192,6 +193,11 @@ async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user
     # from the recycle bin, so only status=deleted yields 404 here).
     if not doc or doc.status == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Per-user isolation: metadata (title/status/version) is still document
+    # data — without this check any org member could read it by guessing ids.
+    await require_permission(db, current_user.id, "can_view_history", "document", doc.id)
+
     starred = bool(await _starred_ids(db, current_user.id, [doc.id]))
     return _with_star(doc, starred)
 
@@ -348,6 +354,31 @@ async def unstar_document(id: str, db: AsyncSession = Depends(get_db), current_u
         )
         await db.commit()
     return {"document_id": doc.id, "starred": False}
+
+
+@router.put("/{id}/snapshot", response_model=ContentSnapshotResponse)
+async def save_content_snapshot(
+    id: str,
+    data: ContentSnapshotUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Overwrite the single IDLE-tier content snapshot (never appends — this
+    is NOT a new version). Called on explicit save (Ctrl+S) and when a client
+    leaves the document, so the latest known-good content survives even when
+    nobody is currently connected, without accumulating history rows."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    await require_permission(db, current_user.id, "can_edit_direct", "document", id)
+
+    doc.content_snapshot = data.content
+    await db.commit()
+    await db.refresh(doc)
+    return {"document_id": doc.id, "saved_at": doc.updated_at}
 
 
 @router.get("/{id}/authorize-check", response_model=AuthorizeCheckResponse)

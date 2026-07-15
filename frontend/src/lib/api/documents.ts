@@ -42,10 +42,11 @@ interface BackendDoc {
   updated_at?: string;
 }
 
-// The list endpoint returns a lighter item without timestamps.
+// The list endpoint returns a lighter item (no created_at / folder metadata).
 type BackendDocListItem = Pick<
   BackendDoc,
-  "id" | "title" | "status" | "current_version_no" | "starred" | "trashed" | "created_by"
+  | "id" | "title" | "status" | "current_version_no" | "starred" | "trashed"
+  | "created_by" | "updated_at"
 >;
 
 // --- adapters (backend -> frontend) ------------------------------------------
@@ -171,9 +172,11 @@ export async function updateDocument(
   // The backend PATCH only accepts title/folder_id/trashed. `content` is owned
   // by Yjs and `status` transitions go through the approval flow, so neither is
   // sent here — only the title is persisted via this call.
+  const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.title = patch.title;
   const d = await apiFetch<BackendDoc>(`/documents/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ title: patch.title }),
+    body: JSON.stringify(body),
   });
   return toSummary(d);
 }
@@ -203,4 +206,18 @@ export async function toggleStar(id: string): Promise<boolean> {
 
 export async function deleteForever(id: string): Promise<void> {
   await apiFetch(`/documents/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Overwrite the document's single IDLE-tier content snapshot (PUT
+ * /documents/{id}/snapshot). This is NOT a new version — it always replaces
+ * the previous value, so casual saves never accumulate history. Called on
+ * explicit save (Ctrl+S / File > Save) and when a client leaves the document,
+ * so the latest known-good content survives even when nobody is connected.
+ */
+export async function saveCurrentSnapshot(id: string, content: Value): Promise<void> {
+  await apiFetch(`/documents/${id}/snapshot`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
 }

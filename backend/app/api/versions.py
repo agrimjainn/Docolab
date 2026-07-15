@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import (
     Document, User, Version, ApprovalMarker, ApprovalStepEvent,
-    ApprovalPolicyStep, Notification, Assignment,
+    ApprovalPolicyStep,
 )
 from app.schemas.version import (
     VersionResponse, VersionListResponse, VersionMetadataResponse,
@@ -16,8 +16,41 @@ from app.schemas.version import (
 )
 from app.services.auth_service import authorize, require_permission, resolve_role
 from app.services.audit_service import record_audit, AuditAction
+from app.services.notification_service import (
+    notify_approvers_of_submission, notify_version_decided,
+)
 
 router = APIRouter()
+
+
+# --- content helpers --------------------------------------------------------
+
+def _is_empty_paragraph(node) -> bool:
+    if not isinstance(node, dict) or node.get("type") != "p":
+        return False
+    children = node.get("children") or []
+    return all(
+        isinstance(c, dict)
+        and isinstance(c.get("text"), str)
+        and c["text"].strip() == ""
+        for c in children
+    )
+
+
+def _is_blank_value(content) -> bool:
+    """True when a Slate value has nothing worth freezing — missing, an empty
+    list, or only empty paragraphs. Any non-paragraph block (image, table,
+    heading, …) counts as content. Mirrors frontend seed.ts::isBlankValue.
+
+    Blank content is normalized to NULL on the version row so it renders as the
+    well-handled "no content captured" state (nothing to compare) instead of a
+    non-null-but-contentless snapshot that would diff as an all-inserted doc.
+    Callers that intentionally omit content (headless approval-flow submits)
+    are unaffected — they already send null and stay null.
+    """
+    if not isinstance(content, list) or len(content) == 0:
+        return True
+    return all(_is_empty_paragraph(n) for n in content)
 
 
 # --- approval-chain helpers -------------------------------------------------
@@ -53,8 +86,9 @@ def _lowest_incomplete_step(steps, approved):
     return None
 
 
-def _mint_baseline(db: AsyncSession, doc: Document, version: Version, user: User):
-    """Final approval: advance the baseline (the one place a marker is written)."""
+async def _mint_baseline(db: AsyncSession, doc: Document, version: Version, user: User):
+    """Final approval: advance the baseline (the one place a marker is written)
+    and tell the submitter + doc participants the comparison baseline moved."""
     db.add(ApprovalMarker(
         id=uuid.uuid4(), org_id=doc.org_id, document_id=doc.id,
         approved_version_id=version.id, approved_by=user.id,
@@ -62,6 +96,7 @@ def _mint_baseline(db: AsyncSession, doc: Document, version: Version, user: User
     version.kind = "approved"
     doc.current_version_no = version.version_no
     doc.status = "working"
+    await notify_version_decided(db, doc=doc, version=version, decided_by_id=user.id, approved=True)
 
 
 # --- endpoints --------------------------------------------------------------
@@ -114,6 +149,7 @@ async def get_version(
         "version_no": version.version_no, "kind": version.kind,
         "created_by": version.created_by, "created_at": version.created_at,
         "s3_url": s3_url,
+        "content": version.content,
     }
 
 
@@ -144,11 +180,25 @@ async def submit_for_approval(
             detail="Document is already pending approval.",
         )
 
-    new_version_no = doc.current_version_no + 1
+    # Number after every existing version (snapshots included) so a submission
+    # never collides with a snapshot row's version_no.
+    max_no = (
+        await db.execute(
+            select(Version.version_no)
+            .where(Version.document_id == doc.id)
+            .order_by(Version.version_no.desc())
+        )
+    ).scalars().first() or 0
+    new_version_no = max(max_no, doc.current_version_no) + 1
+    # Normalize blank/empty content to NULL (see _is_blank_value) so a
+    # contentless submission never freezes a misleading snapshot.
+    frozen_content = None if _is_blank_value(data.content) else data.content
     version = Version(
         id=uuid.uuid4(), org_id=current_user.org_id, document_id=doc.id,
         version_no=new_version_no, kind="submission",
         s3_key=f"versions/{doc.id}/v{new_version_no}", created_by=current_user.id,
+        # Frozen content at submit time (the editor sends its live Yjs value).
+        content=frozen_content,
         # Snapshot the policy at submit time so the in-flight chain is
         # deterministic even if the doc's policy is edited/detached mid-review.
         approval_policy_id=doc.approval_policy_id,
@@ -157,14 +207,10 @@ async def submit_for_approval(
     doc.status = "pending_approval"
     await db.flush()
 
-    # Notify the first approver(s) when a policy chain is attached.
-    if doc.approval_policy_id is not None:
-        db.add(Notification(
-            id=uuid.uuid4(), org_id=current_user.org_id, user_id=current_user.id,
-            document_id=doc.id, type="submission_pending",
-            payload={"version_id": str(version.id), "version_no": new_version_no,
-                     "submitter": str(current_user.id)},
-        ))
+    # Tell whoever can approve this document that a submission is waiting.
+    await notify_approvers_of_submission(
+        db, doc=doc, version=version, submitter_id=current_user.id,
+    )
 
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
@@ -257,7 +303,7 @@ async def approve_version(
     # ---- single owner gate ----
     if policy_id is None:
         await require_permission(db, current_user.id, "can_give_final_approval", "document", doc.id)
-        _mint_baseline(db, doc, version, current_user)
+        await _mint_baseline(db, doc, version, current_user)
         record_audit(db, org_id=current_user.org_id, actor_id=current_user.id,
                      action=AuditAction.APPROVE, target_type="version",
                      target_id=version.id, document_id=doc.id,
@@ -269,7 +315,7 @@ async def approve_version(
     steps, approved = await _load_chain_state(db, version.id, policy_id)
     if not steps:  # policy with no steps configured -> behave as single gate
         await require_permission(db, current_user.id, "can_give_final_approval", "document", doc.id)
-        _mint_baseline(db, doc, version, current_user)
+        await _mint_baseline(db, doc, version, current_user)
         record_audit(db, org_id=current_user.org_id, actor_id=current_user.id,
                      action=AuditAction.APPROVE, target_type="version",
                      target_id=version.id, document_id=doc.id,
@@ -279,7 +325,7 @@ async def approve_version(
 
     step = _lowest_incomplete_step(steps, approved)
     if step is None:  # defensive: chain already complete
-        _mint_baseline(db, doc, version, current_user)
+        await _mint_baseline(db, doc, version, current_user)
         record_audit(db, org_id=current_user.org_id, actor_id=current_user.id,
                      action=AuditAction.APPROVE, target_type="version",
                      target_id=version.id, document_id=doc.id, meta={"mode": "chain_complete"})
@@ -310,7 +356,7 @@ async def approve_version(
 
     if _lowest_incomplete_step(steps, approved) is None:
         # final step satisfied -> baseline advances
-        _mint_baseline(db, doc, version, current_user)
+        await _mint_baseline(db, doc, version, current_user)
         record_audit(db, org_id=current_user.org_id, actor_id=current_user.id,
                      action=AuditAction.APPROVE, target_type="version",
                      target_id=version.id, document_id=doc.id,
@@ -360,6 +406,7 @@ async def reject_version(
 
     version.kind = "rejected"
     doc.status = "working"
+    await notify_version_decided(db, doc=doc, version=version, decided_by_id=current_user.id, approved=False)
     record_audit(db, org_id=current_user.org_id, actor_id=current_user.id,
                  action=AuditAction.REJECT, target_type="version",
                  target_id=version.id, document_id=doc.id, meta={"version_no": version.version_no})

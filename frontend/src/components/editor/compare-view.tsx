@@ -7,6 +7,7 @@ import {
   PlateElement,
   PlateLeaf,
   createPlatePlugin,
+  useEditorRef,
   usePlateEditor,
   usePluginOption,
   type PlateElementProps,
@@ -26,7 +27,6 @@ import { BaseEditorKit } from "@/components/editor/editor-base-kit";
 import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { AI_EDIT_KEY } from "@/lib/ai-attribution";
 import { getSnapshot, type DocSnapshot } from "@/lib/api/snapshots";
-import * as documentsApi from "@/lib/api/documents";
 
 type Side = "old" | "new";
 
@@ -44,22 +44,40 @@ function DiffLeaf(props: PlateLeafProps) {
   const aiOn = usePluginOption(compareDiffPlugin, "aiOn") as boolean;
   const leaf = props.leaf as Record<string, unknown>;
   const op = (leaf.diffOperation as { type?: string } | undefined)?.type;
+  const isAi = aiOn && !!leaf[AI_EDIT_KEY];
 
-  // Blue (AI) overrides red/green: defer styling so the aiEdit leaf renders blue.
-  if (aiOn && leaf[AI_EDIT_KEY]) {
-    return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
+  // Insertions belong to the new pane, deletions to the old pane. Hide the
+  // change on the opposite side so the two panes read as before → after.
+  if ((op === "insert" && side !== "new") || (op === "delete" && side !== "old")) {
+    return (
+      <PlateLeaf {...props}>
+        <span className="hidden">{props.children}</span>
+      </PlateLeaf>
+    );
+  }
+
+  // Blue (AI) overrides red/green. Owned here — not deferred to the aiEdit
+  // plugin — so it's deterministic regardless of leaf-plugin compose order.
+  // Deletions keep the strikethrough; the visible side was resolved above.
+  if (isAi) {
+    return (
+      <PlateLeaf {...props}>
+        <span
+          className={cn(
+            "rounded-sm bg-primary-container/25 text-text-primary",
+            op === "delete" && "line-through",
+          )}
+        >
+          {props.children}
+        </span>
+      </PlateLeaf>
+    );
   }
 
   if (op === "insert") {
     return (
       <PlateLeaf {...props}>
-        <span
-          className={cn(
-            side === "new"
-              ? "rounded-sm bg-insertion-bg text-insertion-text"
-              : "hidden",
-          )}
-        >
+        <span className="rounded-sm bg-insertion-bg text-insertion-text">
           {props.children}
         </span>
       </PlateLeaf>
@@ -69,13 +87,7 @@ function DiffLeaf(props: PlateLeafProps) {
   if (op === "delete") {
     return (
       <PlateLeaf {...props}>
-        <span
-          className={cn(
-            side === "old"
-              ? "rounded-sm bg-deletion-bg text-deletion-text line-through"
-              : "hidden",
-          )}
-        >
+        <span className="rounded-sm bg-deletion-bg text-deletion-text line-through">
           {props.children}
         </span>
       </PlateLeaf>
@@ -191,6 +203,11 @@ export function CompareView({
   snapshotId: string;
   onClose: () => void;
 }) {
+  // The compare overlay renders inside the editor's <Plate> tree, so this is
+  // the live (Yjs-canonical) editor — its children ARE the current document.
+  // (The REST body is intentionally blank; diffing against it showed the whole
+  // document as deleted, which was the "version diff broken" bug.)
+  const liveEditor = useEditorRef();
   const [snapshot, setSnapshot] = React.useState<DocSnapshot | null>(null);
   const [diffValue, setDiffValue] = React.useState<Value | null>(null);
   const [aiOn, setAiOn] = React.useState(false);
@@ -204,24 +221,42 @@ export function CompareView({
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [snap, current] = await Promise.all([
-        getSnapshot(docId, snapshotId),
-        documentsApi.getDocument(docId),
-      ]);
+      const snap = await getSnapshot(docId, snapshotId);
       if (cancelled) return;
-      if (!snap || !current) {
+      if (!snap?.value) {
+        setSnapshot(snap);
         setLoading(false);
         return;
       }
       // Diff old → current. aiEdit/comment marks are ignored so they don't
       // register as textual changes (they're rendered separately).
+      const current = structuredClone(liveEditor.children) as Value;
       const base = createSlateEditor({ plugins: BaseEditorKit });
-      const value = computeDiff(snap.value, current.content, {
+      const value = computeDiff(snap.value, current, {
         isInline: base.api.isInline,
+        // Character-level (intra-line) diff instead of whole-block replace.
+        // Without these, computeDiff's default node matcher gives up on an
+        // edited/reordered paragraph and emits a whole-block delete+insert —
+        // so removing a few characters struck the ENTIRE line red and painted
+        // its counterpart fully green. `elementsAreRelated` forces same-type
+        // blocks to be paired (→ recurse into an inline text diff of just the
+        // changed characters); `lineBreakChar` folds paragraph boundaries into
+        // the text stream so splits/merges diff as reflowing character ops.
+        // Returning null (not false) for different types keeps the default
+        // behaviour, so a paragraph vs. heading still renders as block insert/
+        // delete rather than a noisy char diff.
+        elementsAreRelated: (a, b) => (a.type === b.type ? true : null),
+        lineBreakChar: "\n",
         getInsertProps: defaultGetInsertProps,
         getDeleteProps: defaultGetDeleteProps,
         getUpdateProps: defaultGetUpdateProps,
-        ignoreProps: [AI_EDIT_KEY],
+        // `id` MUST be ignored: live blocks carry a NodeIdPlugin `id` that the
+        // snapshot value doesn't match, so without this every edited paragraph
+        // failed node-matching and diffed as a whole-block delete+insert (the
+        // entire line struck red / painted green). Ignoring it lets same-type
+        // blocks pair and recurse into a character-level intra-line diff.
+        // `aiEdit` is ignored so attribution marks aren't seen as text changes.
+        ignoreProps: [AI_EDIT_KEY, "id"],
       });
       setSnapshot(snap);
       setDiffValue(value as Value);
@@ -230,6 +265,7 @@ export function CompareView({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, snapshotId]);
 
   // Ratio-based synced scrolling (block heights differ between versions).
@@ -308,7 +344,15 @@ export function CompareView({
 
       {/* Panes */}
       <div className="flex min-h-0 flex-1">
-        {loading || !diffValue ? (
+        {!loading && snapshot && !snapshot.value ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-text-muted">
+            <Icon name="history_toggle_off" className="text-[32px]" />
+            <p className="font-ui-sm text-ui-sm">
+              This version was saved before content snapshots existed, so there
+              is nothing to compare.
+            </p>
+          </div>
+        ) : loading || !diffValue ? (
           <div className="flex flex-1 items-center justify-center text-text-muted">
             <Icon name="progress_activity" className="animate-spin text-[28px]" />
           </div>

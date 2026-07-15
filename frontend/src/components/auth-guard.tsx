@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { getToken } from "@/lib/api/client";
+import { heartbeat } from "@/lib/api/presence";
 
 /**
  * Client-side route guard for authenticated pages. The access token lives in
@@ -41,6 +42,16 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (mounted && !hasToken) router.replace("/login");
   }, [mounted, hasToken, router]);
+
+  // Self-reported presence: while an authenticated page is mounted, ping the
+  // REST heartbeat immediately and every 30s so the admin panel shows this user
+  // as online. Best-effort — failures are ignored (presence is soft state).
+  React.useEffect(() => {
+    if (!mounted || !hasToken) return;
+    heartbeat().catch(() => {});
+    const id = setInterval(() => heartbeat().catch(() => {}), 30_000);
+    return () => clearInterval(id);
+  }, [mounted, hasToken]);
 
   if (!hasToken) return null;
   return <>{children}</>;

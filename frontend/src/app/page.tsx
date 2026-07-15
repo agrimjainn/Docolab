@@ -40,15 +40,18 @@ export default function SignUpPage() {
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-app-bg text-on-surface">
-      {/* Left: branding */}
-      <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden border-r border-border-subtle bg-[#ECEEF2] p-xxl lg:flex">
-        <div className="relative z-10 flex items-center gap-sm">
-          <Icon name="note_stack" className="text-[32px] text-primary-container" />
-          <span className="font-display-sm text-display-sm font-bold tracking-tight text-text-primary">
-            Docflow
-          </span>
-        </div>
-        <div className="relative z-10 max-w-md">
+      {/* Left: branding — vertically centered like the login page so the copy
+          doesn't hang at the bottom edge of the viewport. */}
+      <div className="relative hidden w-1/2 flex-col justify-center overflow-hidden border-r border-border-subtle bg-[#ECEEF2] p-xxl lg:flex">
+        {/* max-w-md resolves to 12px in this project's Tailwind v4 config, not
+            the default 28rem (see CLAUDE.md) — use an explicit width instead. */}
+        <div className="relative z-10 w-full max-w-[420px]">
+          <div className="mb-xxl flex items-center gap-sm">
+            <Icon name="note_stack" className="text-[32px] text-primary-container" />
+            <span className="font-display-sm text-display-sm font-bold tracking-tight text-text-primary">
+              Docolab
+            </span>
+          </div>
           <h1 className="mb-md font-display-lg text-display-lg text-text-primary">
             Documents that move at your team&apos;s speed
           </h1>
@@ -79,7 +82,7 @@ export default function SignUpPage() {
         <div className="mb-xl flex items-center gap-sm lg:hidden">
           <Icon name="note_stack" className="text-[28px] text-primary-container" />
           <span className="font-display-sm text-display-sm font-bold tracking-tight text-text-primary">
-            Docflow
+            Docolab
           </span>
         </div>
         <div className="w-full max-w-[400px]">

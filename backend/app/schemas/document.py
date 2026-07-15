@@ -23,6 +23,9 @@ class DocumentResponse(BaseModel):
     yjs_doc_key: str
     starred: bool
     trashed: bool
+    # Admin-assignable AI model for this document (default 'gemini'). Optional so
+    # older callers/response consumers are unaffected.
+    ai_model: Optional[str] = None
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -38,6 +41,8 @@ class DocumentListItem(BaseModel):
     starred: bool
     trashed: bool
     created_by: uuid.UUID
+    # Needed by the browser's "Last modified" sort + "Updated Xh ago" labels.
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -53,3 +58,12 @@ class AuthorizeCheckResponse(BaseModel):
 class StarResponse(BaseModel):
     document_id: uuid.UUID
     starred: bool               # this user's personal bookmark state after the call
+
+class ContentSnapshotUpdate(BaseModel):
+    """Body for PUT /documents/{id}/snapshot — overwrite the single IDLE-tier
+    content snapshot. Not a new version; always replaces the prior value."""
+    content: list
+
+class ContentSnapshotResponse(BaseModel):
+    document_id: uuid.UUID
+    saved_at: datetime

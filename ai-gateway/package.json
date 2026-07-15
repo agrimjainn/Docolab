@@ -1,0 +1,16 @@
+{
+  "name": "ai-gateway",
+  "version": "1.0.0",
+  "description": "Grant-verifying, key-injecting reverse proxy in front of the AI vendors (Google/OpenAI/Anthropic). Keeps vendor API keys off the frontend.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "jsonwebtoken": "^9.0.3"
+  }
+}

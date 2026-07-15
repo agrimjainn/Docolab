@@ -69,9 +69,24 @@ function createChatTransport({
 
       const initBody = JSON.parse(init?.body as string);
 
+      // Backend-governed AI: pass the current document id + the user's token so
+      // the /api/ai/command route can mint a gateway grant (which decides the
+      // model and injects the vendor key). Falls back to the server env key if
+      // these are absent (e.g. gateway not deployed).
+      const token =
+        typeof window !== 'undefined'
+          ? window.localStorage.getItem('docflow.token')
+          : null;
+      const documentId =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('doc') || undefined
+          : undefined;
+
       const body = {
         ...initBody,
         ...bodyOptions,
+        documentId,
+        token,
       };
 
       const res = await fetch(input, {

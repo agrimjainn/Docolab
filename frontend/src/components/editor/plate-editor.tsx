@@ -13,44 +13,53 @@ import { Editor, EditorContainer } from "@/components/ui/editor";
 import { EditorTopBar } from "@/components/editor/editor-top-bar";
 import { getCurrentUser } from "@/lib/api/auth";
 import { buildCursorIdentity } from "@/lib/presence-identity";
+import { saveCurrentSnapshot } from "@/lib/api/documents";
 
-// The comments panel is only mounted when the user opens it, so keep it out of
-// the initial editor chunk and load it on demand.
+// Comments and Recommendations panels are only mounted when the user opens
+// them, so keep them out of the initial editor chunk and load on demand.
 const CommentsPanel = dynamic(
   () =>
     import("@/components/editor/comments-panel").then((m) => m.CommentsPanel),
   { ssr: false },
 );
+const RecommendationsPanel = dynamic(
+  () =>
+    import("@/components/editor/recommendations-panel").then(
+      (m) => m.RecommendationsPanel,
+    ),
+  { ssr: false },
+);
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
+import { DiscussionSync } from "@/components/editor/discussion-sync";
 import { AuthGuard } from "@/components/auth-guard";
 
 export function PlateEditor({ docId }: { docId: string }) {
   return (
     <AuthGuard>
       <DocumentProvider docId={docId}>
-        <Workspace routeDocId={docId} />
+        <Workspace />
       </DocumentProvider>
     </AuthGuard>
   );
 }
 
-function Workspace({ routeDocId }: { routeDocId: string }) {
+function Workspace() {
   const { doc, loading } = useDocument();
 
   if (loading || !doc) return <LoadingShell />;
   // Re-mount the Plate editor when the underlying document changes.
-  return <LoadedWorkspace key={doc.id} doc={doc} routeDocId={routeDocId} />;
+  return <LoadedWorkspace key={doc.id} doc={doc} />;
 }
 
-function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId: string }) {
+function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   // Real-time collaboration is always on: content is owned by Yjs/Hocuspocus
   // (the canonical, persisted path) and the REST `content` is only the seed used
   // when a document's shared Y.Doc is still empty.
   //
-  // The Hocuspocus room is the canonical document id from the route (the real
-  // backend UUID), NOT the local metadata record id — they coincide once the
-  // document store talks to the real API, but the route id is authoritative for
-  // collaboration so two clients on the same URL share a room.
+  // The Hocuspocus room is the RESOLVED backend document id (doc.id), never the
+  // raw route id: on /editor (no ?doc=) the route id is the sentinel "new", and
+  // using it as the room name would (a) drop every user creating a new document
+  // into one shared room and (b) persist to a non-existent row, losing content.
   const cursorData = React.useMemo(() => {
     const me = getCurrentUser();
     return buildCursorIdentity(
@@ -64,23 +73,60 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
     // shared doc is empty).
     skipInitialization: true,
     plugins: React.useMemo(
-      () => [...EditorKit, createYjsPlugin(routeDocId, cursorData)],
+      () => [...EditorKit, createYjsPlugin(doc.id, cursorData)],
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
     ),
   });
-  const { readOnly, commentsOpen, saveNow } = useDocument();
+  const { readOnly, commentsOpen, recommendationsOpen, saveNow, caps } = useDocument();
+  // Latest caps in a ref so the yjs cleanup effect (deps: []) can read them at
+  // unmount time without re-subscribing to every caps change.
+  const canEditRef = React.useRef(caps.canEdit);
+  React.useEffect(() => {
+    canEditRef.current = caps.canEdit;
+  }, [caps.canEdit]);
+  // With skipInitialization the editor starts with empty children and
+  // PlateContent renders null. yjs.init() populates children asynchronously,
+  // but nothing re-renders the tree when it finishes — onReady flips this state
+  // so the editable actually mounts. (This was the "blank editor body" bug.)
+  const [, setYjsReady] = React.useState(false);
 
   // Connect to Hocuspocus and seed the shared Y.Doc. On the very first connect
   // for a document (yjs_state is NULL server-side) the shared doc is empty, so
   // we seed it from the REST `content` we already loaded. Once content lives in
   // Yjs, that seed is ignored (init only seeds when the shared doc is empty).
+  //
+  // React StrictMode (dev only) runs this effect, its cleanup, then the effect
+  // again — synchronously, before any of init()'s internal awaits resolve. Two
+  // real bugs follow from that if handled naively:
+  //   1. Calling init() twice creates a duplicate provider/WebSocket.
+  //   2. Calling destroy() on the phantom first cleanup runs BEFORE init() ever
+  //      reaches YjsEditor.connect() (which registers the Y.Doc observer), so
+  //      the internal unobserveDeep() call removes a listener that was never
+  //      added — Yjs logs "[yjs] Tried to remove event handler that doesn't
+  //      exist." (harmless, but noisy and trips the Next.js error overlay).
+  // Fix: init() runs at most once (guarded by a ref); destroy() is deferred by
+  // one macrotask so the (synchronous) StrictMode remount can cancel it before
+  // it fires. In production there's no double-invoke, so the timer always
+  // fires and this behaves like a normal single init/destroy pair.
+  const yjsInitedRef = React.useRef(false);
+  const destroyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
-    void editor.getApi(YjsPlugin).yjs.init({
-      id: routeDocId,
-      value: doc.content,
-      autoConnect: true,
-    });
+    const yjs = editor.getApi(YjsPlugin).yjs;
+    if (destroyTimerRef.current) {
+      // This is the StrictMode remount — cancel the phantom teardown and reuse
+      // the still-live (or still-initializing) binding from the first run.
+      clearTimeout(destroyTimerRef.current);
+      destroyTimerRef.current = null;
+    } else if (!yjsInitedRef.current) {
+      yjsInitedRef.current = true;
+      void yjs.init({
+        id: doc.id,
+        value: doc.content,
+        autoConnect: true,
+        onReady: () => setYjsReady(true),
+      });
+    }
     // Publish the local user's presence identity immediately (before the first
     // cursor move) so the avatar stack shows this user as soon as they join.
     try {
@@ -89,26 +135,45 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
       /* awareness not ready yet — autoSend will publish on first selection */
     }
     return () => {
-      editor.getApi(YjsPlugin).yjs.destroy();
+      // This timeout only actually fires on a REAL unmount (a StrictMode
+      // phantom-unmount's synchronous remount cancels it above) — so it's
+      // also the right, once-only place to push a final IDLE-tier content
+      // snapshot for "leaving the document" (see saveCurrentSnapshot).
+      destroyTimerRef.current = setTimeout(() => {
+        destroyTimerRef.current = null;
+        if (canEditRef.current) {
+          void saveCurrentSnapshot(doc.id, structuredClone(editor.children)).catch(() => {
+            /* best-effort backup write — Yjs's own persistence is the source of truth */
+          });
+        }
+        yjs.destroy();
+      }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ⌘S / Ctrl+S flushes a manual save (title/status metadata; content is Yjs).
+  // ⌘S / Ctrl+S flushes a manual save: title/status metadata (content is
+  // Yjs-owned and already continuously persisted) PLUS an explicit refresh of
+  // the single IDLE-tier content snapshot, so "Save" always leaves behind an
+  // up-to-date backup even if nobody is online later.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void saveNow();
+        if (canEditRef.current) {
+          void saveCurrentSnapshot(doc.id, structuredClone(editor.children)).catch(() => {});
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [saveNow]);
+  }, [saveNow, doc.id, editor]);
 
   return (
     <Plate editor={editor}>
       <CollabStatus />
+      <DiscussionSync docId={doc.id} />
       <div className="flex h-screen flex-col overflow-hidden">
         <EditorTopBar />
         <div className="flex min-h-0 flex-1">
@@ -120,6 +185,7 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
             />
           </EditorContainer>
           {commentsOpen && <CommentsPanel />}
+          {recommendationsOpen && <RecommendationsPanel />}
         </div>
       </div>
     </Plate>

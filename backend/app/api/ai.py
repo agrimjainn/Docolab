@@ -7,12 +7,97 @@ from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Recommendation, Suggestion
 from app.schemas.ai import (
     AISuggestRequest, AISuggestResponse, ApplyAIRecommendationRequest,
-    ApplyAIRecommendationResponse, AIJobStatusResponse
+    ApplyAIRecommendationResponse, AIJobStatusResponse, AIResolveResponse,
+    AIGrantResponse,
 )
 from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
+from app.services import ai_model_service
+from app.services.ai_grant_service import issue_grant
+from app.core.config import settings
 
 router = APIRouter()
+
+
+async def _resolve_or_404(db: AsyncSession, current_user: User, id: str):
+    """Shared: load an org document, enforce can_suggest, resolve its governed
+    model. Returns (doc, resolved_model)."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc or doc.status == "deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
+    resolved = await ai_model_service.resolve(db, current_user.org_id, doc.ai_model)
+    if resolved is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No AI model is enabled for this organization",
+        )
+    return doc, resolved
+
+
+@router.post("/documents/{id}/ai/grant", response_model=AIGrantResponse)
+async def issue_ai_grant(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived signed grant for an AI action on this document. The
+    frontend calls this immediately before invoking AI, then hands the grant to
+    the AI gateway (as `x-ai-grant`) in place of a vendor key. The grant is
+    scoped to this user + document + the backend-resolved vendor/model and
+    expires in seconds — the gateway verifies it, then injects the real key."""
+    doc, resolved = await _resolve_or_404(db, current_user, id)
+    grant = issue_grant(
+        user_id=current_user.id, org_id=current_user.org_id, document_id=doc.id,
+        vendor=resolved.vendor, model_key=resolved.model_key,
+    )
+    return AIGrantResponse(
+        document_id=str(doc.id),
+        vendor=resolved.vendor,
+        model_key=resolved.model_key,
+        display_name=resolved.display_name,
+        is_fallback=(resolved.model_key != doc.ai_model),
+        grant=grant,
+        gateway_url=settings.AI_GATEWAY_URL,
+        expires_in=settings.AI_GRANT_TTL_SECONDS,
+    )
+
+
+@router.get("/documents/{id}/ai/resolve", response_model=AIResolveResponse)
+async def resolve_ai_model(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Tell the editor which vendor+model to use for this document (backend
+    governs the choice; the client must NOT pick its own). Returns the
+    document's assigned model resolved against the org's ENABLED catalog, with
+    fallback to the org default. No API key is returned — the AI gateway holds
+    keys and is handed a backend-issued grant separately (Phase 2)."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc or doc.status == "deleted":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Invoking AI is a suggest-level action; gate the resolve on the same right.
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
+
+    resolved = await ai_model_service.resolve(db, current_user.org_id, doc.ai_model)
+    if resolved is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No AI model is enabled for this organization",
+        )
+    return AIResolveResponse(
+        document_id=str(doc.id),
+        vendor=resolved.vendor,
+        model_key=resolved.model_key,
+        display_name=resolved.display_name,
+        is_fallback=(resolved.model_key != doc.ai_model),
+    )
 
 
 @router.post("/documents/{id}/ai/suggest", response_model=AISuggestResponse)

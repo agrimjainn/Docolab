@@ -248,6 +248,19 @@ function BrowserContent() {
     load();
   }, [load]);
 
+  // Sharing/role changes made by ANOTHER user don't push to this client, so
+  // this list can go stale (a newly-shared doc doesn't appear until the next
+  // fetch). Poll in the background and refetch on window focus (catches "I
+  // switched away and came back") so it self-corrects without a manual reload.
+  React.useEffect(() => {
+    const interval = setInterval(load, 15000);
+    window.addEventListener("focus", load);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", load);
+    };
+  }, [load]);
+
   const visible = (docs ?? []).filter(
     (d) => statusFilter === "all" || d.status === statusFilter,
   );

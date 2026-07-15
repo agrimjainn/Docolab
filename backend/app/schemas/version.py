@@ -29,6 +29,9 @@ class VersionMetadataResponse(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     s3_url: str  # Signed S3 URL
+    # Frozen Slate document value captured at snapshot time (NULL on legacy
+    # rows). This is what the frontend diffs/restores against.
+    content: Optional[list] = None
 
     class Config:
         from_attributes = True
@@ -41,7 +44,9 @@ class DiffResponse(BaseModel):
 
 
 class SubmitForApprovalRequest(BaseModel):
-    pass
+    # Optional frozen Slate value of the document at submit time. The editor
+    # sends its live (Yjs-canonical) content so the submission is diffable.
+    content: Optional[list] = None
 
 
 class SubmitForApprovalResponse(BaseModel):

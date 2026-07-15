@@ -1,34 +1,47 @@
 import type { NextRequest } from 'next/server';
+import type { LanguageModel } from 'ai';
 
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
 
+import { getGatewayProvider } from '../gateway';
+
 export async function POST(req: NextRequest) {
   const {
     apiKey: key,
+    documentId,
     model = 'gemini-2.5-flash',
     prompt,
     system,
+    token,
   } = await req.json();
 
-  const apiKey = key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  // Preferred: backend-governed gateway (no vendor key on this server).
+  const gateway = await getGatewayProvider({
+    documentId,
+    token,
+    signal: req.signal,
+  });
 
-  if (!apiKey) {
+  // Fallback: server Gemini key (local dev before the gateway is deployed).
+  const apiKey = key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!gateway && !apiKey) {
     return NextResponse.json(
-      { error: 'Missing Gemini API key. Set GOOGLE_GENERATIVE_AI_API_KEY.' },
+      { error: 'AI not configured: no gateway grant and no GOOGLE_GENERATIVE_AI_API_KEY.' },
       { status: 401 }
     );
   }
 
-  const google = createGoogleGenerativeAI({ apiKey });
+  const google = gateway ? null : createGoogleGenerativeAI({ apiKey: apiKey! });
   const modelId = model.startsWith('gemini') ? model : 'gemini-2.5-flash';
+  const languageModel: LanguageModel = gateway ? gateway.model() : google!(modelId);
 
   try {
     const result = await generateText({
       abortSignal: req.signal,
       maxOutputTokens: 50,
-      model: google(modelId),
+      model: languageModel,
       prompt,
       system,
       temperature: 0.7,

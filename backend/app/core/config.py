@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     # org_id is the multi-tenant hook for the future; v1 just uses one fixed value.
     DEFAULT_ORG_ID: str = os.getenv("DEFAULT_ORG_ID", "00000000-0000-0000-0000-000000000001")
 
+    # --- AI gateway (Phase 2/3: backend-governed, multi-vendor AI) ------------
+    # Base URL of the Node ai-gateway service the editor routes model calls
+    # through. Empty = no gateway configured (frontend falls back to its own
+    # provider key; useful in local dev before the gateway is deployed).
+    AI_GATEWAY_URL: str = os.getenv("AI_GATEWAY_URL", "")
+    # HMAC secret the backend signs AI grant tokens with and the gateway verifies
+    # them with — MUST match the gateway's AI_GATEWAY_SECRET. Defaults to
+    # SECRET_KEY so a single-secret dev setup works out of the box; set a
+    # dedicated value in production.
+    AI_GATEWAY_SECRET: str = os.getenv("AI_GATEWAY_SECRET", os.getenv("SECRET_KEY", "super-secret-development-key-change-in-production"))
+    # How long an issued AI grant is valid. Kept short: a grant is minted right
+    # before an AI action and only needs to survive that single request.
+    AI_GRANT_TTL_SECONDS: int = int(os.getenv("AI_GRANT_TTL_SECONDS", "120"))
+
     # CORS allowed origins (the frontend's address). The browser blocks the
     # frontend from calling this API unless its origin is listed here.
     # Comma-separated; override via the CORS_ORIGINS env var in production.

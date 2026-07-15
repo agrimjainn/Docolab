@@ -1,0 +1,233 @@
+/* =============================================================================
+   glacier.css — scoped theme for the Admin panel ("Frozen Light" glassmorphism).
+
+   Everything is scoped under `.glacier` so none of these tokens or component
+   classes leak into the main Docolab app (which has its own light design
+   system in globals.css). The admin layout wraps its subtree in `.glacier`.
+   ============================================================================= */
+
+.glacier {
+  --gl-bg: #0a0e1a;
+  --gl-surface: #0f1524;
+  --gl-surface-container: #141c2e;
+  --gl-surface-container-high: #1a2438;
+  --gl-surface-container-highest: #202c42;
+  --gl-surface-variant: #1a2438;
+  --gl-primary: #7dd3fc;
+  --gl-primary-container: #0e4d6e;
+  --gl-on-primary-container: #c8eaff;
+  --gl-on-surface: #e0e8f0;
+  --gl-on-surface-variant: #a0b4c4;
+  --gl-tertiary: #c8a0f0;
+  --gl-secondary: #88b4cc;
+  --gl-error: #ff6b6b;
+
+  color-scheme: dark;
+  background-color: var(--gl-bg);
+  color: var(--gl-on-surface);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Ambient background glows -------------------------------------------------- */
+.glacier .gl-ambient {
+  position: fixed;
+  border-radius: 9999px;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(120px);
+}
+.glacier .gl-ambient-1 {
+  top: -20%;
+  left: -10%;
+  width: 50vw;
+  height: 50vw;
+  background: rgba(125, 211, 252, 0.05);
+}
+.glacier .gl-ambient-2 {
+  bottom: -10%;
+  right: -5%;
+  width: 40vw;
+  height: 40vw;
+  background: rgba(200, 160, 240, 0.05);
+  filter: blur(100px);
+}
+
+/* Glass surfaces ------------------------------------------------------------ */
+.glacier .gl-card {
+  background: rgba(15, 21, 36, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(125, 211, 252, 0.1);
+  border-radius: 1rem;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+.glacier .gl-card-header {
+  border-bottom: 1px solid rgba(125, 211, 252, 0.1);
+  background: rgba(20, 28, 46, 0.3);
+}
+.glacier .gl-panel {
+  background: rgba(15, 21, 36, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(125, 211, 252, 0.12);
+  box-shadow: 0 0 30px rgba(125, 211, 252, 0.05), inset 0 0 20px rgba(125, 211, 252, 0.02);
+}
+
+/* Buttons ------------------------------------------------------------------- */
+.glacier .gl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  background: rgba(125, 211, 252, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  color: var(--gl-primary);
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+}
+.glacier .gl-btn:hover {
+  background: rgba(125, 211, 252, 0.2);
+}
+.glacier .gl-btn:active {
+  transform: scale(0.97);
+}
+.glacier .gl-btn-solid {
+  background: var(--gl-primary);
+  color: #001f2e;
+  border: 1px solid var(--gl-primary);
+}
+.glacier .gl-btn-solid:hover {
+  background: #a5e0fd;
+  box-shadow: 0 0 20px rgba(125, 211, 252, 0.25);
+}
+.glacier .gl-btn-danger {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  color: var(--gl-error);
+}
+.glacier .gl-btn-danger:hover {
+  background: rgba(255, 107, 107, 0.18);
+}
+.glacier .gl-btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--gl-on-surface-variant);
+}
+.glacier .gl-btn-ghost:hover {
+  background: rgba(26, 36, 56, 0.5);
+  color: var(--gl-primary);
+  border-color: rgba(125, 211, 252, 0.2);
+}
+.glacier .gl-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Inputs / selects ---------------------------------------------------------- */
+.glacier .gl-input,
+.glacier .gl-select {
+  width: 100%;
+  background: rgba(15, 21, 36, 0.4);
+  border: 1px solid rgba(125, 211, 252, 0.15);
+  color: var(--gl-on-surface);
+  border-radius: 0.5rem;
+  transition: all 0.25s ease;
+  outline: none;
+}
+.glacier .gl-input::placeholder {
+  color: rgba(160, 180, 196, 0.5);
+}
+.glacier .gl-input:focus,
+.glacier .gl-select:focus {
+  border-color: var(--gl-primary);
+  box-shadow: 0 0 15px rgba(125, 211, 252, 0.15);
+  background: rgba(15, 21, 36, 0.6);
+}
+.glacier .gl-select option {
+  background: #141c2e;
+  color: var(--gl-on-surface);
+}
+
+/* Chips / role badges ------------------------------------------------------- */
+.glacier .gl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  background: rgba(125, 211, 252, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  color: var(--gl-primary);
+}
+
+/* Presence dot -------------------------------------------------------------- */
+.glacier .gl-dot-online {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+.glacier .gl-dot-offline {
+  background: #88b4cc;
+}
+
+/* List row hover ------------------------------------------------------------ */
+.glacier .gl-row {
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+.glacier .gl-row:hover {
+  background: rgba(26, 36, 56, 0.4);
+  border-color: rgba(125, 211, 252, 0.05);
+}
+
+/* Modal overlay ------------------------------------------------------------- */
+.glacier .gl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(5, 8, 15, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Material Symbols weight tuned for the glacier look ------------------------ */
+.glacier .material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24;
+}
+.glacier .material-symbols-outlined.fill {
+  font-variation-settings: "FILL" 1, "wght" 300, "GRAD" 0, "opsz" 24;
+}
+
+/* Scrollbar ----------------------------------------------------------------- */
+.glacier ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.glacier ::-webkit-scrollbar-track {
+  background: rgba(15, 21, 36, 0.2);
+}
+.glacier ::-webkit-scrollbar-thumb {
+  background: rgba(125, 211, 252, 0.2);
+  border-radius: 4px;
+}
+.glacier ::-webkit-scrollbar-thumb:hover {
+  background: rgba(125, 211, 252, 0.4);
+}
+
+/* Spin (loading) ------------------------------------------------------------ */
+.glacier .gl-spin {
+  animation: gl-spin 0.8s linear infinite;
+}
+@keyframes gl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

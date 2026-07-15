@@ -1,5 +1,96 @@
 # Docolab — Project Instructions
 
+## RESOLVED (2026-07-03): follow-up fixes + new features
+
+Second pass after the 2026-07-02 production fixes. All backend-verifiable via
+`backend/` regression scripts run against the live stack; all UI paths
+verified live in-browser (console clean, zero errors).
+
+**Bug found & fixed: `yjs.destroy()` console error.** The 2026-07-02
+StrictMode guard skipped re-running `init()` on the phantom remount but still
+unconditionally called `destroy()` on cleanup — including the FIRST (phantom)
+cleanup, before `init()` had reached `YjsEditor.connect()` (which registers
+the Y.Doc observer). Yjs's `unobserveDeep` then logged "[yjs] Tried to remove
+event handler that doesn't exist" on every mount. Fixed by deferring
+`destroy()` by one macrotask (`setTimeout(...,0)`) so a synchronous StrictMode
+remount cancels it before it fires; in production (no double-invoke) this is
+just a normal single init/destroy pair. `plate-editor.tsx`.
+
+**Storage tiering reworked** to match: cold = approved versions (permanent),
+warm = pending-submission versions (permanent until decided), idle = a single
+mutable "last known state" snapshot that's OVERWRITTEN (never appended).
+- Removed the manual "Save version" feature entirely (`POST
+  /documents/{id}/versions`, `SnapshotCreateRequest`, the button in
+  `version-history-dialog.tsx`) — it let users create unlimited permanent
+  version rows, defeating the point of tiering.
+- Added `documents.content_snapshot` JSONB (migration `0007_content_snapshot`)
+  — one column, always overwritten. New `PUT /documents/{id}/snapshot`.
+  Written by Ctrl+S / File > Save (`plate-editor.tsx`, `doc-menubar.tsx`) and
+  on leaving the document (piggybacked on the same deferred-destroy timer
+  above, so it only fires once on a REAL unmount).
+- The HOT tier (`documents.yjs_state`, Hocuspocus's own debounced persist) was
+  already correct and needed no change — verified it keeps overwriting the
+  same row on every edit burst regardless of who's connected.
+
+**Notification bug found & fixed:** `submission_pending` was notifying the
+SUBMITTER (`user_id=current_user.id`) instead of the approver — the person
+who needed to act never heard about it. New `app/services/
+notification_service.py` centralizes recipient resolution (direct
+document-scope assignees only, not the full org/folder inheritance walk —
+this is best-effort UX, not a security boundary) and adds two new types:
+`version_approved`/`version_rejected` (submitter + doc participants, not the
+decider) and `recommendation_created` (submitter, when a Manager leaves
+feedback). Wired into `versions.py::_mint_baseline`/`reject_version` and
+`recommendations.py::create_recommendation`.
+
+**Notification bell rebuilt** (`components/notification-bell.tsx`) from a
+toast-only stub into a real dropdown: unread badge, mark-read/mark-all-read,
+click-to-navigate deep links (`/editor?doc=X&open=versions|compare|
+recommendations[&compareVersion=Y]`), consumed once on mount by
+`editor-top-bar.tsx` then stripped from the URL. Mounted in both `top-nav.tsx`
+(browser page) and `editor-top-bar.tsx` (editor) so a notification is
+reachable from wherever the user currently is.
+
+**New `RecommendationsPanel`** (`components/editor/recommendations-panel.tsx`)
+— a dedicated side panel (same pattern as CommentsPanel) listing every
+Manager recommendation across the doc's version history with reply threads
+and a "Mark addressed" action (gated on `caps.canApprove`). Toggled via a new
+icon in the editor top bar and via notification deep-links.
+
+**Live-update polling added** (comments were REST-backed, not part of the Yjs
+doc, so another user's comment/resolve/edit never appeared without a reload):
+- `discussion-sync.tsx` polls every 5s while the Comments panel is open,
+  merging (not replacing) so an in-flight local write can't be wiped by a
+  poll landing mid-request, and a genuine remote deletion isn't resurrected
+  by treating "was previously synced, now missing from backend" differently
+  from "never synced yet, still uploading."
+- `browser/page.tsx` polls the doc list every 15s + refetches on window
+  focus — fixes "a newly-shared doc doesn't show up for the recipient" (this
+  was NEVER a backend bug — verified via a live 2-user API test that sharing
+  is reflected server-side instantly; the list was just stale client-side).
+- `access-control-panel.tsx::changeRole/revoke` made optimistic (update local
+  state immediately, roll back on failure) instead of waiting on the
+  revoke+assign round-trip, addressing "role change feels slow to reflect."
+
+**Dead code removed**: `components/editor/access-control-panel.tsx` — never
+imported by anything (confirmed via full-repo grep both before and after this
+change), duplicate of `ShareDialog`'s functionality.
+
+**Fixed**: signup page (`app/page.tsx`) branding column was invisible/garbled
+— `max-w-md` resolves to `12px` in this project's Tailwind v4 config (already
+documented below), squishing the whole left panel into a vertical sliver.
+Replaced with an explicit `max-w-[420px]`, matching the login page's pattern.
+Also caught a second leftover "Docflow" on `login/page.tsx`'s desktop panel
+(the earlier `replace_all` missed it — different surrounding whitespace).
+
+**Known pre-existing, out-of-scope lint debt**: `npm run lint` reports ~36
+errors, all inside vendored/generated Plate.js template files under
+`components/ui/*-node.tsx` (`suggestion-node.tsx`, `table-node.tsx`,
+`block-draggable.tsx`, etc.) — none touched this session or last. `next
+build` (what actually gates a Vercel deploy) is unaffected and passes clean;
+confirmed repeatedly throughout both sessions.
+
+
 ## Architecture: 3-Service Monorepo
 
 | Service | Dir | Runtime |
@@ -309,7 +400,82 @@ works end-to-end (`collaborators.ts::searchUsers` polls `GET /users` by
 name/email → `assignments.assignRole` → `POST /assignments` doc-scoped). It was
 just invisible because the editor body is blank and isolation masked it.
 
-## KNOWN UNRESOLVED: blank editor document body (the "Yjs gating" problem)
+## RESOLVED (2026-07-02): blank editor body + production-readiness pass
+
+All nine production issues fixed and verified live (backend smoke test +
+browser session against the running stack). Summary of the session's changes:
+
+**Blank editor body — ROOT CAUSE FOUND & FIXED.** With
+`skipInitialization: true`, `PlateContent` returns null while
+`editor.children` is empty, and NOTHING re-renders it after the async
+`yjs.init()` finishes (the creation-time `onReady` that `usePlateEditor` uses
+to force a re-render is skipped along with init). Fix: pass `onReady` to
+`yjs.init({...})` in `plate-editor.tsx` and bump a state. Also added a
+StrictMode single-init guard (re-run reconnects instead of re-initializing) —
+kills the dev-only "[yjs] Tried to remove event handler" spam + duplicate WS.
+
+**"new" room bug (document saving).** The Yjs room name was the ROUTE id —
+literally `"new"` for every fresh document — so all new docs shared one room
+and persistence wrote to `WHERE id='new'` (no row). Room is now the RESOLVED
+`doc.id`. Verified: type → `[store] doc=<uuid>` → reload restores content.
+
+**Comments (end-to-end).** `DiscussionSync` was never mounted — now mounted in
+`plate-editor.tsx`. Comment ids are client-generated UUIDs shared with the
+backend (`CommentCreate.id`, idempotent create), so text marks/plugin
+state/backend rows stay in sync across reloads. Anchor (`documentContent`)
+persisted. New backend endpoints: `PATCH /comments/{id}` (edit, author-only),
+`DELETE /comments/{id}` (author or resolver; root deletes thread).
+`discussion-sync.tsx` write-through now covers create/edit/delete/resolve.
+
+**Version diff/restore (backend-backed).** New `versions.content` JSONB
+(migration `0006_version_content`) + `POST /documents/{id}/versions`
+(kind='snapshot') + content on `GET /versions/{id}` and on
+submit-for-approval. `lib/api/snapshots.ts` rewritten onto these (localStorage
+store + demo seeds deleted). Version dialog captures the LIVE editor children;
+compare diffs snapshot vs live editor; restore applies content to the live
+editor (propagates via Yjs — no reload). Submission numbering now uses
+max(version_no)+1 so snapshots and submissions never collide.
+
+**Isolation hardening.** `GET /documents/{id}` now requires
+`can_view_history` (was: any org member could read metadata).
+`hocuspocus-server/auth.js::getUserRole` returns null (connection REJECTED)
+instead of defaulting to viewer — the old default let ANY authenticated user
+read ANY document's content over WS by UUID. Tests updated (59/59 pass).
+`document-store` no longer silently CREATES a new doc when loading an
+existing id fails (was spawning blank "Untitled document"s on 403/404/network
+errors) — it toasts and returns to /browser.
+
+**Disconnects.** `client.ts::getFreshToken()` (decodes JWT exp, refreshes when
+<60s left); the Hocuspocus provider token is now that async fn, so a reconnect
+after access-token expiry silently rotates instead of failing auth forever.
+
+**Presence cursors.** Added `@slate-yjs/react` +
+`components/ui/remote-cursor-overlay.tsx`, wired via YjsPlugin
+`render.afterEditable`. Remote carets/selections render in each user's hue
+with a fading name label.
+
+**Access control menu.** Share dialog: proper error toasts on
+invite/change/remove (were unhandled rejections), and "Commenter" removed from
+assignable roles (it silently granted editor). `components/editor/
+access-control-panel.tsx` is dead code (never imported) — candidate for
+deletion.
+
+**Branding/UX.** "Docflow" → "Docolab" in layout metadata, top-nav, login,
+signup; signup branding panel now vertically centered (matches login); login
+field relabelled Email (was "Username"/"admin" demo leftovers). localStorage
+keys (`docflow.token` etc.) deliberately KEPT so existing sessions survive the
+deploy. Backend list items now include `updated_at` (browser sort/labels work).
+
+**Deploy checklist (Vercel + backend/collab hosts)**
+- Vercel env: `NEXT_PUBLIC_API_URL=https://<backend>/api`,
+  `NEXT_PUBLIC_COLLAB_URL=wss://<hocuspocus>` (MUST be wss:// on https pages),
+  `GOOGLE_GENERATIVE_AI_API_KEY`.
+- Backend: deploy with `AUTO_MIGRATE=1` (applies `0006_version_content`) or run
+  `alembic upgrade head` manually. CORS_ORIGINS must include the Vercel domain.
+- hocuspocus-server: mandatory infra; needs `JWT_SECRET` (= backend
+  SECRET_KEY) + `DATABASE_URL`; port open for WSS.
+
+## RESOLVED HISTORY: blank editor document body (the "Yjs gating" problem)
 
 **Symptom**: the editor chrome renders (menus, title, Saved status, role badge,
 Share) but the document body is **completely blank** — no `contenteditable` /
