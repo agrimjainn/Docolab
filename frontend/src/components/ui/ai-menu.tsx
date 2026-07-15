@@ -326,7 +326,7 @@ const aiChatItems = {
       editor.getApi(AIChatPlugin).aiChat.submit(input, {
         mode: 'insert',
         prompt:
-          'Please comment on the following content and provide reasonable and meaningful feedback.',
+          'Analyze the selected text or document. Provide constructive, specific, and actionable feedback or comments directly addressing the content\'s clarity, structure, tone, or styling. Your response should be a concise, helpful editorial comment. Do not include conversational filler like "Sure, here is your comment" or "I think...".',
         toolName: 'comment',
       });
     },
@@ -345,11 +345,16 @@ const aiChatItems = {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         mode: 'insert',
         prompt: isEmpty
-          ? `<Document>
+          ? `You are an expert co-writer. Read the current document state:
+<Document>
 {editor}
 </Document>
-Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
-          : 'Continue writing AFTER <Block> ONLY ONE SENTENCE. DONT REPEAT THE TEXT.',
+Write exactly one new, highly contextually relevant sentence to begin a new paragraph immediately following the document above. Do not repeat existing text. Output ONLY the raw text of that single sentence—no formatting, no conversational preamble, and no markdown block wrappers.`
+          : `You are an expert co-writer. Read the context block:
+<Block>
+{editor}
+</Block>
+Continue writing seamlessly immediately after this block. Write exactly one highly engaging, contextually coherent sentence. Do not repeat any existing text. Output ONLY the raw text of that single sentence—no formatting, no conversational preamble, and no markdown block wrappers.`,
         toolName: 'generate',
       });
     },
@@ -377,7 +382,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Add a small number of contextually relevant emojis within each block only. You may insert emojis, but do not remove, replace, or rewrite existing text, and do not modify Markdown syntax, links, or line breaks.',
+          'You are an inline text enhancer. Tastefully insert contextually relevant emojis within the provided text blocks to add visual engagement.\n\nCRITICAL RULES:\n1. Do NOT alter, rewrite, or delete any of the existing words, sentences, or punctuation.\n2. Do NOT touch or modify Markdown syntax, links, HTML, formatting marks, or line breaks.\n3. Output ONLY the augmented text containing the added emojis. Absolutely no prefaces, conversational filler, or explanations.',
         toolName: 'edit',
       });
     },
@@ -389,8 +394,8 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt: {
-          default: 'Explain {editor}',
-          selecting: 'Explain',
+          default: 'Provide a clear, detailed, and insightful explanation of the following document content:\n\n{editor}\n\nBreak down complex concepts or terminology into accessible language. Keep the tone professional and educational, and avoid conversational filler or meta-introductions.',
+          selecting: 'Provide a clear, detailed, and insightful explanation of the selected text. Break down complex concepts or terminology into accessible language. Keep the tone professional and educational, and avoid conversational filler or meta-introductions.',
         },
         toolName: 'generate',
       });
@@ -403,7 +408,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Fix spelling, grammar, and punctuation errors within each block only, without changing meaning, tone, or adding new information.',
+          'You are a professional proofreader. Correct any spelling, typographical, grammatical, syntax, and punctuation errors within the text blocks.\n\nCRITICAL RULES:\n1. Preserve the author\'s original vocabulary, voice, meaning, and tone strictly.\n2. Do not rewrite sentences or add/remove substantive information.\n3. Retain all Markdown elements, links, formatting, and structures intact.\n4. Output ONLY the finalized, error-free text with no commentary, markdown code blocks, or conversational preambles.',
         toolName: 'edit',
       });
     },
@@ -414,7 +419,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     value: 'generateMarkdownSample',
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
-        prompt: 'Generate a markdown sample',
+        prompt: 'Generate a rich, comprehensive, and well-structured markdown document sample. The sample should realistically showcase a balanced variety of markdown features including different levels of headings (H1, H2, H3), paragraphs, nested lists (bulleted and numbered), blockquotes, text formatting (bold, italics, strikethrough), an inline code snippet, a block code snippet, a horizontal rule, and a simple table. Make the content realistic (e.g., mock documentation or a quickstart guide). Output ONLY the raw markdown content itself. Do not wrap the entire response in extra markdown blockquotes or triple backticks.',
         toolName: 'generate',
       });
     },
@@ -425,7 +430,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     value: 'generateMdxSample',
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
-        prompt: 'Generate a mdx sample',
+        prompt: 'Generate a clean, professional, and syntactically valid MDX (Markdown with JSX) sample. Include standard Markdown elements like headings, inline text formatting, lists, and blockquotes alongside standard React JSX custom elements (e.g., an `<Alert title="Note" variant="info">` component, a custom interactive `<Badge>`, or a `<CodeSnippet>` block) imported or rendered naturally within the text. Output ONLY the raw MDX file contents with no surrounding markdown blockquotes or introductory/concluding explanations.',
         toolName: 'generate',
       });
     },
@@ -437,7 +442,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Improve the writing for clarity and flow, without changing meaning or adding new information.',
+          'You are an expert editorial writer. Enhance the clarity, flow, readability, and overall professional quality of the text blocks.\n\nCRITICAL RULES:\n1. Maintain the author\'s original message, core meaning, and perspective completely.\n2. Do not introduce new ideas or delete crucial arguments.\n3. Keep the tone appropriate to the context (polished and fluent).\n4. Preserve all Markdown syntax, links, and structure.\n5. Output ONLY the improved text directly without any introductory conversational statements, explanations, or wrapping blockcodes.',
         toolName: 'edit',
       });
     },
@@ -461,7 +466,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Make the content longer by elaborating on existing ideas within each block only, without changing meaning or adding new information.',
+          'You are a detailed content writer. Elaborate on the ideas, points, or arguments in the text blocks to make them more descriptive, detailed, and comprehensive.\n\nCRITICAL RULES:\n1. Expand only by detailing the existing concepts—do not wander into unrelated topics or change the underlying meaning.\n2. Keep the writing natural, engaging, and professional. Avoid inserting fluff or redundant phrases.\n3. Output ONLY the expanded text blocks directly. Do not include introductory notes, explanations, or surrounding formatting wrappers.',
         toolName: 'edit',
       });
     },
@@ -473,7 +478,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Make the content shorter by reducing verbosity within each block only, without changing meaning or removing essential information.',
+          'You are an expert content editor. Condense the text blocks to make them highly concise and punchy, removing redundant words or passive phrasing.\n\nCRITICAL RULES:\n1. Maintain all key information, core arguments, and original meaning intact.\n2. Do not omit crucial details or modify the author\'s perspective.\n3. Simplify sentence structures for fast reading.\n4. Output ONLY the shortened, concise text block directly without conversational preambles or explanations.',
         toolName: 'edit',
       });
     },
@@ -494,7 +499,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     onSelect: ({ editor, input }) => {
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         prompt:
-          'Simplify the language by using clearer and more straightforward wording within each block only, without changing meaning or adding new information.',
+          'You are a plain-language writer. Simplify the phrasing and vocabulary of the text blocks to make them highly clear, accessible, and direct.\n\nCRITICAL RULES:\n1. Replace high-level jargon, convoluted syntax, and wordiness with clear, everyday phrasing.\n2. Do not change the original facts, meaning, or add new details.\n3. Retain any Markdown links or formatting patterns.\n4. Output ONLY the simplified version of the text directly with no commentary or prefaces.',
         toolName: 'edit',
       });
     },
@@ -507,8 +512,8 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
       void editor.getApi(AIChatPlugin).aiChat.submit(input, {
         mode: 'insert',
         prompt: {
-          default: 'Summarize {editor}',
-          selecting: 'Summarize',
+          default: 'Read the following document carefully:\n\n{editor}\n\nProduce a highly concise, objective, and clear summary of the core points, key insights, and main conclusions. Output ONLY the summary text, with no preamble, "Here is a summary", or closing conversational filler.',
+          selecting: 'Produce a highly concise, objective, and clear summary of the selected text, highlighting the core points and main takeaways. Output ONLY the summary text directly, with no preamble or conversational filler.',
         },
         toolName: 'generate',
       });
