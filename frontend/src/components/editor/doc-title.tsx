@@ -54,7 +54,10 @@ export function DocTitle() {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
         onBlur={() => void saveNow()}
-        style={{ width }}
+        // maxWidth caps the sizer-computed width so a long title SHRINKS inside
+        // the top bar instead of pushing/painting over the status pill and the
+        // collaborator stack.
+        style={{ width, maxWidth: "100%" }}
         placeholder="Untitled document"
         className={cn(
           "min-w-0 truncate rounded-md bg-transparent px-1.5 py-0.5 font-ui-base text-ui-base font-semibold text-text-primary",

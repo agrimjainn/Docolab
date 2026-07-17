@@ -85,7 +85,10 @@ export function EditorTopBar() {
 
   return (
     <header className="z-50 flex h-14 w-full shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-surface px-lg text-primary">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* overflow-hidden: the title/status cluster must CLIP when space runs
+          out — without it, its fixed-width children painted over the
+          collaborator avatars / role badge on the right. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <Link
           href="/browser"
           aria-label="Back to documents"
@@ -97,7 +100,7 @@ export function EditorTopBar() {
           <DocMenubar />
         </div>
         <div className="mx-1 hidden h-5 w-px shrink-0 bg-border-subtle sm:block" />
-        <div className="flex min-w-[180px] flex-1 flex-col">
+        <div className="flex min-w-[100px] max-w-full flex-1 flex-col overflow-hidden">
           <DocTitle />
           <div className="px-1.5">
             <SaveStatus />
@@ -123,7 +126,13 @@ export function EditorTopBar() {
         <RoleBadge />
         <RoleActions />
         <div className="hidden sm:block">
-          <PresenceStack docId={docId} onOpenShare={() => setShareOpen(true)} />
+          <PresenceStack
+            docId={docId}
+            // "Manage access" is only offered to Owners/Managers — Viewers and
+            // Collaborators hold no member-management rights (the backend would
+            // 403 them anyway; don't dangle the button).
+            onOpenShare={caps.canApprove ? () => setShareOpen(true) : undefined}
+          />
         </div>
 
         <button
@@ -159,7 +168,9 @@ export function EditorTopBar() {
 
         <NotificationBell />
 
-        {caps.canManageMembers && (
+        {/* Owners AND Managers can share (rank hierarchy: each may only hand
+            out roles below their own — enforced again server-side). */}
+        {caps.canApprove && (
           <button
             onClick={() => setShareOpen(true)}
             className="flex items-center gap-1.5 rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-accent-hover"

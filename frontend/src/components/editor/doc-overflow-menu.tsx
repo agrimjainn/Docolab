@@ -2,7 +2,6 @@
 
 import * as React from "react";
 
-import type { DocStatus } from "@/lib/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +16,6 @@ import { Icon } from "@/components/icon";
 import { useDocActions } from "@/components/editor/use-doc-actions";
 import { useDocument } from "@/lib/store/document-store";
 
-const STATUSES: DocStatus[] = ["Draft", "Working", "Pending Review", "Approved"];
-
 function Row({ icon, children }: { icon: string; children: React.ReactNode }) {
   return (
     <>
@@ -29,7 +26,7 @@ function Row({ icon, children }: { icon: string; children: React.ReactNode }) {
 }
 
 export function DocOverflowMenu() {
-  const { status, setStatus, readOnly, setVersionsOpen } = useDocument();
+  const { readOnly, setVersionsOpen } = useDocument();
   const a = useDocActions();
 
   return (
@@ -53,19 +50,9 @@ export function DocOverflowMenu() {
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Row icon="label">Status: {status}</Row>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {STATUSES.map((s) => (
-                <DropdownMenuItem key={s} onSelect={() => setStatus(s)}>
-                  <span className="flex-1">{s}</span>
-                  {s === status && <Icon name="check" size={16} />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          {/* Status is server-owned (approval workflow) and shown read-only in
+              the top-bar pill — the manual status switcher was removed on
+              purpose: users must not hand-set "Approved"/"Pending Review". */}
 
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

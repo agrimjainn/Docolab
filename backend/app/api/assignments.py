@@ -6,12 +6,46 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import Assignment, Role, User, Folder, Document
 from app.schemas.assignment import AssignmentCreate, AssignmentResponse, AssignmentListResponse, AssignmentListEntry
-from app.services.auth_service import require_permission
+from app.services.auth_service import resolve_role
 from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
 VALID_SCOPES = ("folder", "document", "org")
+
+# Membership hierarchy. Member management is RANK-based:
+#   - owner    (3): may grant/revoke every role below owner (managers included).
+#                   Owner-to-owner handover goes through the dedicated
+#                   /documents/{id}/transfer-ownership endpoint, not here.
+#   - approver (2): may grant/revoke roles STRICTLY below their own —
+#                   editors (Collaborators) and viewers only.
+#   - editor/viewer: no member management at all.
+# This deliberately supersedes the old flat `can_manage_members` gate (which
+# was owner-only and 403'd every Manager trying to share): the hierarchy is
+# "you can only manage members below your own rank".
+ROLE_RANK = {"viewer": 0, "editor": 1, "approver": 2, "owner": 3}
+MANAGER_RANK = ROLE_RANK["approver"]
+
+
+async def _require_rank_over(
+    db: AsyncSession, user: User, scope_type: str, scope_id, target_role_name: str
+) -> str:
+    """Authorize a member-management action on `scope` targeting a member whose
+    role is `target_role_name`. The caller's effective role on the scope must be
+    at least approver AND strictly outrank the target role. Returns the caller's
+    resolved role name (handy for audit meta); raises 403 otherwise."""
+    _, caller_role, _ = await resolve_role(db, user.id, scope_type, scope_id)
+    caller_rank = ROLE_RANK.get(caller_role or "", -1)
+    target_rank = ROLE_RANK.get(target_role_name, ROLE_RANK["owner"])
+    if caller_rank < MANAGER_RANK or caller_rank <= target_rank:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Forbidden: you can only manage members whose role is below your own "
+                f"(your role: {caller_role or 'none'}; target role: {target_role_name})"
+            ),
+        )
+    return caller_role or ""
 
 
 async def _owner_role_id(db: AsyncSession, org_id):
@@ -26,15 +60,18 @@ async def create_assignment(data: AssignmentCreate, db: AsyncSession = Depends(g
     if data.scope_type not in VALID_SCOPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid scope type")
 
-    # Escalation guard (structural): to grant a role on a scope you must already
-    # hold can_manage_members on that scope. For scope_type="org" this means you
-    # must be an org admin — so org-admin can only be granted by an org admin.
-    await require_permission(db, current_user.id, "can_manage_members", data.scope_type, data.scope_id)
-
     target_user = (await db.execute(select(User).where(User.id == data.user_id))).scalars().first()
     target_role = (await db.execute(select(Role).where(Role.id == data.role_id))).scalars().first()
     if not target_user or not target_role:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user_id or role_id")
+
+    # Escalation guard (rank-based): you may only GRANT a role strictly below
+    # your own effective role on the scope. Owners grant managers and below;
+    # managers (approvers) grant editors/viewers; editors and viewers grant
+    # nothing. Nobody can grant a role at or above their own (so a manager can
+    # never mint another manager, and owner handover stays on the dedicated
+    # transfer-ownership endpoint).
+    await _require_rank_over(db, current_user, data.scope_type, data.scope_id, target_role.name)
 
     # Validate the scope target exists (org scope must be the caller's own org).
     if data.scope_type == "folder":
@@ -97,7 +134,16 @@ async def delete_assignment(id: str, db: AsyncSession = Depends(get_db), current
     if not assignment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
 
-    await require_permission(db, current_user.id, "can_manage_members", assignment.scope_type, assignment.scope_id)
+    # Rank guard (mirrors create): you may only REVOKE an assignment whose role
+    # is strictly below your own on the scope — a manager can remove editors and
+    # viewers but never another manager or the owner.
+    revoked_role = (
+        await db.execute(select(Role).where(Role.id == assignment.role_id))
+    ).scalars().first()
+    await _require_rank_over(
+        db, current_user, assignment.scope_type, assignment.scope_id,
+        revoked_role.name if revoked_role else "owner",
+    )
 
     # Last-owner guard: don't allow removing the only owner of a scope.
     owner_role_id = await _owner_role_id(db, current_user.org_id)

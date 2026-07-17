@@ -43,11 +43,17 @@ export function VersionHistoryDialog({
   // editor — the only truthful source of current content. The REST document
   // body is intentionally blank (content is collab-owned).
   const editor = useEditorRef();
-  const canSubmit = ctx?.caps?.canSubmit ?? false;
+  // Submit-for-review only makes sense for someone whose work needs a HIGHER
+  // authority's sign-off. Owners/Managers ARE the approvers (approval never
+  // goes beyond them), and a solo user is the document's owner — so neither
+  // ever sees Submit. Mirrors RoleActions in the top bar.
+  const canSubmit =
+    (ctx?.caps?.canSubmit ?? false) && !(ctx?.caps?.canApprove ?? false);
   const canEdit = ctx?.caps?.canEdit ?? false;
 
   const [list, setList] = React.useState<DocSnapshot[] | null>(null);
   const [restoring, setRestoring] = React.useState<string | null>(null);
+  const [confirmRestore, setConfirmRestore] = React.useState<DocSnapshot | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
   const load = React.useCallback(() => {
@@ -78,7 +84,9 @@ export function VersionHistoryDialog({
     try {
       await versions.submitForApproval(docId, content);
       toast.success("Submitted for approval");
-      ctx?.setStatus("Pending Review");
+      // Status is server-owned — pull the fresh "Pending Review" state instead
+      // of hand-setting it client-side.
+      void ctx?.refreshDoc();
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't submit for approval");
@@ -201,7 +209,7 @@ export function VersionHistoryDialog({
                 </button>
                 {canEdit && (
                   <button
-                    onClick={() => void restore(v)}
+                    onClick={() => setConfirmRestore(v)}
                     disabled={restoring === v.id}
                     className="rounded-md px-2.5 py-1 font-ui-xs text-ui-xs font-semibold text-text-secondary transition-colors hover:bg-surface-container disabled:opacity-60"
                   >
@@ -212,6 +220,48 @@ export function VersionHistoryDialog({
             </div>
           ))}
         </div>
+
+        {/* Restore confirmation — replacing the live document is destructive
+            for everyone connected, so it must never happen on a stray click. */}
+        {confirmRestore && (
+          <Dialog open onOpenChange={(o) => !o && setConfirmRestore(null)}>
+            <DialogContent
+              showCloseButton={false}
+              aria-describedby={undefined}
+              style={{ backgroundColor: "#ffffff", width: "min(26rem, calc(100vw - 2rem))" }}
+              className="border border-border-subtle p-5 opacity-100 shadow-float"
+            >
+              <DialogTitle className="mb-2 flex items-center gap-2 font-ui-lg text-ui-lg font-bold text-text-primary">
+                <Icon name="history" className="text-primary-container" />
+                Restore this version?
+              </DialogTitle>
+              <p className="mb-4 font-ui-sm text-ui-sm text-text-secondary">
+                The current document content will be replaced with{" "}
+                <span className="font-semibold">{confirmRestore.label}</span> for
+                everyone in the document. Frozen versions in this history are kept,
+                so you can always come back.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setConfirmRestore(null)}
+                  className="rounded-md px-3 py-1.5 font-ui-sm text-ui-sm font-semibold text-text-secondary hover:bg-surface-container"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const snap = confirmRestore;
+                    setConfirmRestore(null);
+                    void restore(snap);
+                  }}
+                  className="rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary hover:bg-accent-hover"
+                >
+                  Restore version
+                </button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </DialogContent>
     </Dialog>
   );

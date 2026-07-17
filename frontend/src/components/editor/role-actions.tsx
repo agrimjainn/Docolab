@@ -62,9 +62,10 @@ export function RoleBadge() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        title="Preview as role"
+        title="Your role in this document (click to preview as a lower role)"
         className={cn(
-          "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 font-ui-xs text-ui-xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-container sm:flex",
+          // Always visible — this is where a user sees THEIR role on the doc.
+          "flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 font-ui-xs text-ui-xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-container",
           ROLE_TONE[uiRole],
         )}
       >
@@ -103,7 +104,7 @@ export function RoleBadge() {
  *  - Manager/Owner (canApprove): "Review submission" when one is pending.
  */
 export function RoleActions() {
-  const { docId, caps } = useDocument();
+  const { docId, caps, status, refreshDoc } = useDocument();
   // RoleActions renders inside <Plate>, so this is the LIVE (Yjs-canonical)
   // editor. Freeze its content on submit so the resulting version is diffable
   // in history — omitting it froze `content: null`, which made every
@@ -126,9 +127,21 @@ export function RoleActions() {
     }
   }, [docId, caps.canApprove]);
 
+  // Keep the pending-submission state LIVE: a collaborator's submit must make
+  // the manager's "Review" button appear without a reload. Re-checks on mount,
+  // whenever the (polled) doc status flips, on a slow interval, and on window
+  // focus. refreshPending itself no-ops for non-approvers.
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set inside the callback
     void refreshPending();
-  }, [refreshPending]);
+    const interval = setInterval(() => void refreshPending(), 15_000);
+    const onFocus = () => void refreshPending();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshPending, status]);
 
   const onSubmit = async () => {
     const content = structuredClone(editor.children);
@@ -140,6 +153,9 @@ export function RoleActions() {
     try {
       const res = await submitForApproval(docId, content);
       toast.success(res.message || `Submitted version ${res.versionNo} for review`);
+      // Reflect the new pending_approval state (status pill + this button)
+      // immediately instead of only after a reload.
+      await refreshDoc();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not submit for review");
     } finally {
@@ -148,6 +164,16 @@ export function RoleActions() {
   };
 
   if (caps.canSubmit && !caps.canApprove) {
+    // Already submitted and awaiting a decision: show a non-actionable pending
+    // marker (re-submitting while pending is a 409 server-side anyway).
+    if (status === "Pending Review") {
+      return (
+        <span className="flex items-center gap-1.5 rounded-md bg-status-warning/15 px-3 py-1.5 font-ui-sm text-ui-sm font-semibold text-status-warning">
+          <Icon name="hourglass_top" size={16} />
+          <span className="hidden sm:inline">Pending review</span>
+        </span>
+      );
+    }
     return (
       <button
         onClick={() => void onSubmit()}
@@ -188,6 +214,9 @@ export function RoleActions() {
             onDone={() => {
               setReviewOpen(false);
               void refreshPending();
+              // Approve/reject changed the doc's status + version — reflect it
+              // in the top bar immediately.
+              void refreshDoc();
             }}
           />
         )}

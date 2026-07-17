@@ -42,6 +42,20 @@ app.add_middleware(
     allow_headers=["*"],               # incl. Authorization, Content-Type
 )
 
+
+# ---------------------------------------------------------------------------
+# Liveness probe — deliberately touches NOTHING (no DB, no auth) so it answers
+# in microseconds. Point an uptime pinger (UptimeRobot / cron-job.org, every
+# 5-10 min) at GET /health to keep free-tier hosts (Render) from spinning the
+# service down; the cold start after spin-down is the 20-30s first-request
+# latency users see. Also usable as the platform health check.
+# ---------------------------------------------------------------------------
+@app.get("/health", include_in_schema=False)
+@app.get(f"{settings.API_STR}/health", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
+
+
 # Mount Routers (using flat routes under app.api)
 app.include_router(auth.router, prefix=f"{settings.API_STR}/auth", tags=["Authentication"])
 app.include_router(roles.router, prefix=f"{settings.API_STR}/roles", tags=["Roles"])
