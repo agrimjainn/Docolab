@@ -5,8 +5,9 @@ import type { DocStatus } from "@/lib/data";
 
 export type { DocStatus };
 
-/** Permission a collaborator (or link) holds on a document. */
-export type Role = "owner" | "editor" | "commenter" | "viewer";
+/** Permission a collaborator (or link) holds on a document. "manager" is the
+ *  backend `approver` role (review + edit + manage members below their rank). */
+export type Role = "owner" | "manager" | "editor" | "commenter" | "viewer";
 
 /** Who can reach a document beyond explicitly-invited people. */
 export type GeneralAccess = "restricted" | "anyone";

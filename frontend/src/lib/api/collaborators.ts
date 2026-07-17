@@ -27,6 +27,8 @@ function roleToUi(role: Role): UiRole {
   switch (role) {
     case "owner":
       return "Owner";
+    case "manager":
+      return "Manager";
     case "editor":
     case "commenter":
       return "Collaborator";
@@ -39,8 +41,9 @@ function backendNameToRole(name: string): Role {
   switch (name) {
     case "owner":
       return "owner";
-    case "editor":
     case "approver":
+      return "manager"; // backend approver == UI Manager (was mislabelled Editor)
+    case "editor":
       return "editor";
     default:
       return "viewer";

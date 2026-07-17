@@ -77,9 +77,13 @@ export function toUiRole(role: BackendRole | null, isCreator: boolean): UiRole |
   }
 }
 
-/** UI label -> backend role name to send when assigning (Owner & Manager → owner). */
-export function toBackendRole(ui: UiRole): "owner" | "editor" | "viewer" {
-  if (ui === "Owner" || ui === "Manager") return "owner";
+/** UI label -> backend role name to send when assigning. Manager maps to the
+ *  backend `approver` role (review + edit, no member management above their
+ *  rank) — mapping it to `owner` handed out full ownership powers, which broke
+ *  the permission hierarchy. Owner handover has its own transfer endpoint. */
+export function toBackendRole(ui: UiRole): BackendRole {
+  if (ui === "Owner") return "owner";
+  if (ui === "Manager") return "approver";
   if (ui === "Collaborator") return "editor";
   return "viewer";
 }

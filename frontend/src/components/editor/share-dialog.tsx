@@ -21,31 +21,54 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import * as collaborators from "@/lib/api/collaborators";
+import * as assignmentsApi from "@/lib/api/assignments";
 import { getCurrentUser } from "@/lib/api/auth";
+import { useDocumentOptional } from "@/lib/store/document-store";
 
 const ROLE_LABEL: Record<Role, string> = {
   owner: "Owner",
+  manager: "Manager",
   editor: "Editor",
   commenter: "Commenter",
   viewer: "Viewer",
 };
 
-// Only roles that exist on the backend are assignable. "commenter" is NOT one
-// of them — it silently mapped to editor (an accidental privilege grant).
-const ASSIGNABLE: Role[] = ["editor", "viewer"];
+// Membership hierarchy (mirrors the backend rank guard in assignments.py):
+// you may only assign/change/remove roles STRICTLY below your own rank.
+// Owner → Manager/Editor/Viewer; Manager → Editor/Viewer; everyone else → none.
+const ROLE_RANK: Record<Role, number> = {
+  owner: 3,
+  manager: 2,
+  editor: 1,
+  commenter: 1,
+  viewer: 0,
+};
+
+/** Roles the caller may hand out, given their own role on this document. */
+function assignableFor(myRole: Role | null): Role[] {
+  const mine = myRole ? ROLE_RANK[myRole] : -1;
+  return (["manager", "editor", "viewer"] as Role[]).filter(
+    (r) => ROLE_RANK[r] < mine,
+  );
+}
 
 function RoleSelect({
   value,
+  assignable,
   onChange,
   onRemove,
+  onTransferOwnership,
   disabled,
 }: {
   value: Role;
+  assignable: Role[];
   onChange: (r: Role) => void;
   onRemove?: () => void;
+  /** Owner-only: hand this member the document (owner demotes to Manager). */
+  onTransferOwnership?: () => void;
   disabled?: boolean;
 }) {
-  if (disabled) {
+  if (disabled || assignable.length === 0) {
     return (
       <span className="px-2 font-ui-sm text-ui-sm text-text-muted">
         {ROLE_LABEL[value]}
@@ -59,12 +82,21 @@ function RoleSelect({
         <Icon name="expand_more" size={16} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-40">
-        {ASSIGNABLE.map((r) => (
+        {assignable.map((r) => (
           <DropdownMenuItem key={r} onSelect={() => onChange(r)}>
             <span className="flex-1">{ROLE_LABEL[r]}</span>
             {r === value && <Icon name="check" size={16} />}
           </DropdownMenuItem>
         ))}
+        {onTransferOwnership && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onTransferOwnership}>
+              <Icon name="swap_horiz" size={16} className="text-text-muted" />
+              <span className="flex-1">Transfer ownership…</span>
+            </DropdownMenuItem>
+          </>
+        )}
         {onRemove && (
           <>
             <DropdownMenuSeparator />
@@ -99,7 +131,25 @@ export function ShareDialog({
   const [inviting, setInviting] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<User[]>([]);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [transferTarget, setTransferTarget] = React.useState<User | null>(null);
+  const [transferring, setTransferring] = React.useState(false);
   const meId = getCurrentUser()?.id;
+
+  // The caller's REAL role decides what they may hand out (hierarchy: you can
+  // only manage roles strictly below your own — mirrors the backend guard).
+  const ctx = useDocumentOptional();
+  const myRole: Role | null =
+    ctx?.realUiRole === "Owner"
+      ? "owner"
+      : ctx?.realUiRole === "Manager"
+        ? "manager"
+        : ctx?.realUiRole === "Collaborator"
+          ? "editor"
+          : ctx?.realUiRole === "Viewer"
+            ? "viewer"
+            : null;
+  const assignable = assignableFor(myRole);
+  const myRank = myRole ? ROLE_RANK[myRole] : -1;
 
   React.useEffect(() => {
     if (!open) return;
@@ -184,6 +234,24 @@ export function ShareDialog({
     }
   };
 
+  // Owner-only handover: the target becomes Owner, the caller is demoted to
+  // Manager (backend does this atomically via /transfer-ownership).
+  const confirmTransfer = async () => {
+    if (!transferTarget) return;
+    setTransferring(true);
+    try {
+      await assignmentsApi.transferOwnership(docId, transferTarget.id, "approver");
+      toast.success(`${transferTarget.name} is now the owner — you are a Manager`);
+      setTransferTarget(null);
+      setState(await collaborators.getShareState(docId).catch(() => state));
+      void ctx?.refreshDoc?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't transfer ownership");
+    } finally {
+      setTransferring(false);
+    }
+  };
+
   const setAccess = async (anyone: boolean) => {
     if (!state) return;
     setState(
@@ -248,11 +316,11 @@ export function ShareDialog({
               type="text"
               className="ml-2 flex-1 bg-transparent py-2 font-ui-sm text-ui-sm text-text-primary outline-none placeholder:text-text-muted"
             />
-            <RoleSelect value={inviteRole} onChange={setInviteRole} />
+            <RoleSelect value={inviteRole} assignable={assignable} onChange={setInviteRole} />
           </div>
           <button
             onClick={() => void invite()}
-            disabled={inviting}
+            disabled={inviting || assignable.length === 0}
             className="rounded-lg bg-primary-container px-4 font-ui-sm text-ui-sm font-semibold text-on-primary transition-colors hover:bg-accent-hover disabled:opacity-60"
           >
             {inviting ? "Inviting…" : "Invite"}
@@ -318,13 +386,58 @@ export function ShareDialog({
               </div>
               <RoleSelect
                 value={role}
-                disabled={role === "owner"}
+                assignable={assignable}
+                // Hierarchy: a member is editable only if their role ranks
+                // STRICTLY below yours (your own row is never editable).
+                disabled={user.id === meId || ROLE_RANK[role] >= myRank}
                 onChange={(r) => void changeRole(user.id, r)}
                 onRemove={() => void remove(user.id)}
+                onTransferOwnership={
+                  myRole === "owner" && role !== "owner" && user.id !== meId
+                    ? () => setTransferTarget(user)
+                    : undefined
+                }
               />
             </div>
           ))}
         </div>
+
+        {/* Ownership-transfer confirmation */}
+        {transferTarget && (
+          <Dialog open onOpenChange={(o) => !o && setTransferTarget(null)}>
+            <DialogContent
+              showCloseButton={false}
+              aria-describedby={undefined}
+              style={{ backgroundColor: "#ffffff", width: "min(26rem, calc(100vw - 2rem))" }}
+              className="border border-border-subtle p-5 opacity-100 shadow-float"
+            >
+              <DialogTitle className="mb-2 flex items-center gap-2 font-ui-lg text-ui-lg font-bold text-text-primary">
+                <Icon name="swap_horiz" className="text-primary-container" />
+                Transfer ownership?
+              </DialogTitle>
+              <p className="mb-4 font-ui-sm text-ui-sm text-text-secondary">
+                <span className="font-semibold">{transferTarget.name}</span> will become
+                the owner of “{docTitle}”. You will be demoted to Manager and cannot
+                undo this yourself.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setTransferTarget(null)}
+                  className="rounded-md px-3 py-1.5 font-ui-sm text-ui-sm font-semibold text-text-secondary hover:bg-surface-container"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => void confirmTransfer()}
+                  disabled={transferring}
+                  className="rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary hover:bg-accent-hover disabled:opacity-60"
+                >
+                  {transferring ? "Transferring…" : "Transfer ownership"}
+                </button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
 
         {/* General access */}
         <div className="mt-2 border-t border-border-subtle px-6 py-4">
@@ -362,7 +475,11 @@ export function ShareDialog({
               </p>
             </div>
             {anyone && state && (
-              <RoleSelect value={state.linkRole} onChange={(r) => void setLinkRole(r)} />
+              <RoleSelect
+                value={state.linkRole}
+                assignable={assignable}
+                onChange={(r) => void setLinkRole(r)}
+              />
             )}
           </div>
         </div>

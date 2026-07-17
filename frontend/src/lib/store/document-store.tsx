@@ -49,9 +49,13 @@ interface DocumentContextValue {
   setVersionsOpen: (v: boolean) => void;
   setRecommendationsOpen: (v: boolean) => void;
   setTitle: (t: string) => void;
-  setStatus: (s: DocStatus) => void;
   onContentChange: (value: Value) => void;
   saveNow: () => Promise<void>;
+  /** Re-fetch this document's governance metadata (status, version) and
+   *  re-resolve the user's role, so the top bar / actions reflect a
+   *  submit/approve/reject/share immediately instead of only after a reload.
+   *  Status is server-owned — there is deliberately NO manual setStatus. */
+  refreshDoc: () => Promise<void>;
 }
 
 const DocumentContext = React.createContext<DocumentContextValue | null>(null);
@@ -210,15 +214,6 @@ export function DocumentProvider({
     [schedule],
   );
 
-  const setStatus = React.useCallback(
-    (s: DocStatus) => {
-      statusRef.current = s;
-      setStatusState(s);
-      schedule();
-    },
-    [schedule],
-  );
-
   const onContentChange = React.useCallback(
     (value: Value) => {
       // Ignore selection-only changes (Plate reuses the children reference).
@@ -232,6 +227,45 @@ export function DocumentProvider({
   const saveNow = React.useCallback(async () => {
     await flush();
   }, [flush]);
+
+  // Pull the latest governance metadata for this doc and re-resolve the role.
+  // Called after an action that changes server-side state (submit / approve /
+  // reject / ownership transfer) AND on a slow poll below, so the status pill,
+  // version label, and role-gated actions update without a reload. Preserves
+  // the live editor `content` and the in-flight `title` (owned elsewhere) —
+  // it only refreshes metadata.
+  const refreshDoc = React.useCallback(async () => {
+    const id = idRef.current;
+    if (!id || id === "new" || !loadedRef.current) return;
+    try {
+      const fresh = await documentsApi.getDocument(id);
+      if (fresh && idRef.current === id) {
+        statusRef.current = fresh.status;
+        setStatusState(fresh.status);
+        setDoc((prev) =>
+          prev ? { ...fresh, content: prev.content, title: prev.title } : fresh,
+        );
+      }
+      const a = await getMyAccess(id);
+      if (idRef.current === id) setResolvedRole(a.backendRole);
+    } catch {
+      /* backend unreachable — keep current state rather than dropping access */
+    }
+  }, []);
+
+  // Live governance updates without a reload: another user's submit / approval
+  // / rejection / role change lands here via a slow poll plus a refetch when
+  // the window regains focus. Content itself is real-time via Yjs; this only
+  // covers the REST-owned metadata around it.
+  React.useEffect(() => {
+    const interval = setInterval(() => void refreshDoc(), 15_000);
+    const onFocus = () => void refreshDoc();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshDoc]);
 
   // Flush pending autosave on unmount (don't just drop the timer — a rename
   // followed by an immediate navigation was silently lost).
@@ -305,9 +339,9 @@ export function DocumentProvider({
       setVersionsOpen,
       setRecommendationsOpen,
       setTitle,
-      setStatus,
       onContentChange,
       saveNow,
+      refreshDoc,
     }),
     [
       resolvedId,
@@ -327,9 +361,9 @@ export function DocumentProvider({
       realUiRole,
       previewRole,
       setTitle,
-      setStatus,
       onContentChange,
       saveNow,
+      refreshDoc,
     ],
   );
 
