@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-07-20T12:01:22.203Z",
+  "projectRoot": "C:\\Users\\arnav.jade\\Documents\\docflow\\github frontend testing\\Docolab",
+  "structure": {
+    "hasPackageJson": false,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1784548882204
+}
